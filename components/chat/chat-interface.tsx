@@ -1,13 +1,15 @@
 'use client';
 
-import { useState, useRef, useEffect } from 'react';
+import { useState, useRef, useEffect, type FormEvent, type KeyboardEvent } from 'react';
 import { Send, Bot, User, AlertCircle, Image as ImageIcon } from 'lucide-react';
+import Image from 'next/image';
 import { stream } from 'fetch-event-stream';
 import { Streamdown } from 'streamdown';
 import { ConnectButton, useActiveAccount, TransactionButton, useActiveWalletChain } from 'thirdweb/react';
 import { client } from '@/components/providers/thirdweb-provider';
 import { prepareTransaction } from 'thirdweb';
 import { defineChain } from 'thirdweb/chains';
+import { cn } from '@/lib/utils';
 
 interface Message {
   id: string;
@@ -19,12 +21,49 @@ interface Message {
   status?: 'sending' | 'sent' | 'error';
 }
 
-interface ActionEvent {
-  type: 'sign_transaction' | 'sign_swap' | 'monitor_transaction';
-  data: any;
-  request_id: string;
-  session_id: string;
-}
+type TransactionPayload = {
+  to: string;
+  chain_id: number;
+  value?: string;
+  data?: string;
+  function?: string;
+};
+
+type SignSwapIntent = {
+  amount: string;
+  origin_token_address: string;
+  destination_token_address: string;
+  destination_chain_id: string;
+};
+
+type SignSwapPayload = {
+  intent: SignSwapIntent;
+  transaction: TransactionPayload;
+};
+
+type MonitorTransactionPayload = {
+  transaction_id: string;
+};
+
+type ActionEvent =
+  | {
+      type: 'sign_transaction';
+      data: TransactionPayload;
+      request_id: string;
+      session_id: string;
+    }
+  | {
+      type: 'sign_swap';
+      data: SignSwapPayload;
+      request_id: string;
+      session_id: string;
+    }
+  | {
+      type: 'monitor_transaction';
+      data: MonitorTransactionPayload;
+      request_id: string;
+      session_id: string;
+    };
 
 interface ImageEvent {
   url: string;
@@ -41,20 +80,16 @@ export function ChatInterface({ className }: ChatInterfaceProps) {
   const [input, setInput] = useState('');
   const [isLoading, setIsLoading] = useState(false);
   const [sessionId, setSessionId] = useState<string | null>(null);
-  const [currentRequestId, setCurrentRequestId] = useState<string | null>(null);
+  const [, setCurrentRequestId] = useState<string | null>(null);
   const [thinkingMessage, setThinkingMessage] = useState<string | null>(null);
   const [isThinking, setIsThinking] = useState(false);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
-  
-  // Get the connected wallet address
+
   const activeAccount = useActiveAccount();
-  
-  // Get the connected wallet's chain
   const activeChain = useActiveWalletChain();
 
-  // Transaction preparation function
-  const prepareTransactionFromAction = (actionData: any) => {
+  const prepareTransactionFromAction = (actionData: TransactionPayload) => {
     return prepareTransaction({
       client,
       chain: defineChain(actionData.chain_id),
@@ -64,16 +99,12 @@ export function ChatInterface({ className }: ChatInterfaceProps) {
     });
   };
 
-  // Transaction success handler
-  const handleTransactionSuccess = (receipt: any) => {
+  const handleTransactionSuccess = (receipt: unknown) => {
     console.log('Transaction confirmed:', receipt);
-    // You can add additional success handling here, like updating UI or showing notifications
   };
 
-  // Transaction error handler
-  const handleTransactionError = (error: any) => {
+  const handleTransactionError = (error: unknown) => {
     console.error('Transaction failed:', error);
-    // You can add additional error handling here, like showing error notifications
   };
 
   const scrollToBottom = () => {
@@ -84,19 +115,18 @@ export function ChatInterface({ className }: ChatInterfaceProps) {
     scrollToBottom();
   }, [messages]);
 
-  // Clear thinking indicator when messages update with content
   useEffect(() => {
     const lastMessage = messages[messages.length - 1];
     if (lastMessage && lastMessage.role === 'assistant' && lastMessage.content && isThinking) {
-      console.log('Clearing thinking indicator due to message content');
       setIsThinking(false);
       setThinkingMessage(null);
     }
   }, [messages, isThinking]);
 
-  const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!input.trim() || isLoading) return;
+  const submitMessage = async () => {
+    if (!input.trim() || isLoading) {
+      return;
+    }
 
     const userMessage: Message = {
       id: Date.now().toString(),
@@ -110,7 +140,6 @@ export function ChatInterface({ className }: ChatInterfaceProps) {
     setInput('');
     setIsLoading(true);
 
-    // Create assistant message for streaming
     const assistantMessageId = (Date.now() + 1).toString();
     const assistantMessage: Message = {
       id: assistantMessageId,
@@ -125,7 +154,6 @@ export function ChatInterface({ className }: ChatInterfaceProps) {
     setMessages(prev => [...prev, assistantMessage]);
 
     try {
-      // Use the fetch-event-stream library to handle the event stream
       const events = await stream('/api/chat', {
         method: 'POST',
         headers: {
@@ -146,60 +174,43 @@ export function ChatInterface({ className }: ChatInterfaceProps) {
         }),
       });
 
-      // Process the event stream
       for await (const event of events) {
         if (!event.data) {
           continue;
         }
 
         try {
-          const parsedEventData = JSON.parse(event.data);
-          
-          // Hide thinking indicator immediately for any response content
+          const parsedEventData = JSON.parse(event.data) as Record<string, unknown>;
+
           if (event.event === 'delta' || event.event === 'action' || event.event === 'image') {
             setIsThinking(false);
             setThinkingMessage(null);
           }
-          
+
           switch (event.event) {
             case 'init': {
-              console.log('Init event', parsedEventData);
-              // Handle init event (session id and request id)
-              if (parsedEventData.session_id) {
+              if (typeof parsedEventData.session_id === 'string') {
                 setSessionId(parsedEventData.session_id);
               }
-              if (parsedEventData.request_id) {
+              if (typeof parsedEventData.request_id === 'string') {
                 setCurrentRequestId(parsedEventData.request_id);
               }
               break;
             }
-            
+
             case 'presence': {
-              console.log('Presence event', parsedEventData);
-              // Handle intermediate thinking steps - show as thinking indicator
-              if (parsedEventData.data && typeof parsedEventData.data === 'string') {
-                console.log('Setting thinking message:', parsedEventData.data);
+              if (typeof parsedEventData.data === 'string') {
                 setThinkingMessage(parsedEventData.data);
                 setIsThinking(true);
               }
               break;
             }
-            
+
             case 'delta': {
-              console.log('Delta event', parsedEventData, 'isThinking:', isThinking);
-              
-              // Hide thinking indicator immediately when ANY delta event arrives
-              if (isThinking) {
-                console.log('Hiding thinking indicator on delta event');
-                setIsThinking(false);
-                setThinkingMessage(null);
-              }
-              
-              // Handle delta event (streamed output text response)
-              if (parsedEventData.v) {
-                setMessages(prev => 
-                  prev.map(msg => 
-                    msg.id === assistantMessageId 
+              if (typeof parsedEventData.v === 'string') {
+                setMessages(prev =>
+                  prev.map(msg =>
+                    msg.id === assistantMessageId
                       ? { ...msg, content: msg.content + parsedEventData.v }
                       : msg
                   )
@@ -207,95 +218,72 @@ export function ChatInterface({ className }: ChatInterfaceProps) {
               }
               break;
             }
-            
+
             case 'action': {
-              console.log('Action event', parsedEventData);
-              
-              // Hide thinking indicator when actions arrive (part of final response)
-              if (isThinking) {
-                setIsThinking(false);
-                setThinkingMessage(null);
-              }
-              
-              // Handle transaction signing, swaps, monitoring
-              const actionData: ActionEvent = {
-                type: parsedEventData.type,
-                data: parsedEventData.data,
-                request_id: parsedEventData.request_id,
-                session_id: parsedEventData.session_id,
-              };
-              
-              setMessages(prev => 
-                prev.map(msg => 
-                  msg.id === assistantMessageId 
+              const actionData = {
+                type: parsedEventData.type as ActionEvent['type'],
+                data: parsedEventData.data as ActionEvent['data'],
+                request_id: typeof parsedEventData.request_id === 'string' ? parsedEventData.request_id : '',
+                session_id: typeof parsedEventData.session_id === 'string' ? parsedEventData.session_id : '',
+              } as ActionEvent;
+
+              setMessages(prev =>
+                prev.map(msg =>
+                  msg.id === assistantMessageId
                     ? { ...msg, actions: [...(msg.actions || []), actionData] }
                     : msg
                 )
               );
               break;
             }
-            
+
             case 'image': {
-              console.log('Image event', parsedEventData);
-              
-              // Hide thinking indicator when images arrive (part of final response)
-              if (isThinking) {
-                setIsThinking(false);
-                setThinkingMessage(null);
-              }
-              
-              // Handle image rendering
               const imageData: ImageEvent = {
-                url: parsedEventData.url,
-                width: parsedEventData.width,
-                height: parsedEventData.height,
+                url: String(parsedEventData.url),
+                width: typeof parsedEventData.width === 'number' ? parsedEventData.width : Number(parsedEventData.width ?? 512),
+                height: typeof parsedEventData.height === 'number' ? parsedEventData.height : Number(parsedEventData.height ?? 512),
               };
-              
-              setMessages(prev => 
-                prev.map(msg => 
-                  msg.id === assistantMessageId 
+
+              setMessages(prev =>
+                prev.map(msg =>
+                  msg.id === assistantMessageId
                     ? { ...msg, images: [...(msg.images || []), imageData] }
                     : msg
                 )
               );
               break;
             }
-            
+
             case 'context': {
-              console.log('Context event', parsedEventData);
-              // Handle context changes (chain ids, wallet address, etc)
               break;
             }
-            
+
             case 'error': {
-              console.log('Error event', parsedEventData);
-              // Hide thinking indicator on error
               setIsThinking(false);
               setThinkingMessage(null);
-              
-              // Handle error event
-              setMessages(prev => 
-                prev.map(msg => 
-                  msg.id === assistantMessageId 
-                    ? { 
-                        ...msg, 
-                        content: msg.content + '\n\n❌ Error: ' + (parsedEventData.data || 'An error occurred'),
-                        status: 'error'
+
+              setMessages(prev =>
+                prev.map(msg =>
+                  msg.id === assistantMessageId
+                    ? {
+                        ...msg,
+                        content:
+                          msg.content + '\\n\\n❌ Error: ' + (typeof parsedEventData.data === 'string' ? parsedEventData.data : 'An error occurred'),
+                        status: 'error',
                       }
                     : msg
                 )
               );
               break;
             }
-            
+
             case 'done': {
-              // Hide thinking indicator and mark message as complete
               setIsThinking(false);
               setThinkingMessage(null);
-              
-              setMessages(prev => 
-                prev.map(msg => 
-                  msg.id === assistantMessageId 
+
+              setMessages(prev =>
+                prev.map(msg =>
+                  msg.id === assistantMessageId
                     ? { ...msg, status: 'sent' }
                     : msg
                 )
@@ -309,17 +297,16 @@ export function ChatInterface({ className }: ChatInterfaceProps) {
       }
     } catch (error) {
       console.error('Error sending message:', error);
-      // Clear thinking state on error
       setIsThinking(false);
       setThinkingMessage(null);
-      
-      setMessages(prev => 
-        prev.map(msg => 
-          msg.id === assistantMessageId 
-            ? { 
-                ...msg, 
+
+      setMessages(prev =>
+        prev.map(msg =>
+          msg.id === assistantMessageId
+            ? {
+                ...msg,
                 content: 'Sorry, I encountered an error while processing your request. Please try again.',
-                status: 'error'
+                status: 'error',
               }
             : msg
         )
@@ -329,138 +316,170 @@ export function ChatInterface({ className }: ChatInterfaceProps) {
     }
   };
 
-  const handleKeyDown = (e: React.KeyboardEvent) => {
-    if (e.key === 'Enter' && !e.shiftKey) {
-      e.preventDefault();
-      handleSubmit(e as any);
+  const handleSubmit = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    await submitMessage();
+  };
+
+  const handleKeyDown = (event: KeyboardEvent<HTMLTextAreaElement>) => {
+    if (event.key === 'Enter' && !event.shiftKey) {
+      event.preventDefault();
+      void submitMessage();
     }
   };
 
   return (
-    <div className={`flex flex-col h-full max-w-4xl mx-auto ${className}`}>
-      {/* Header */}
-      <div className="flex items-center justify-between p-4 border-b border-gray-200 dark:border-gray-700">
-        <div className="flex items-center gap-3">
-          <div className="flex items-center justify-center w-8 h-8 bg-blue-100 dark:bg-blue-900 rounded-full">
-            <Bot className="w-5 h-5 text-blue-600 dark:text-blue-400" />
+    <div
+      className={cn(
+        'mx-auto flex h-full w-full max-w-5xl flex-col overflow-hidden rounded-3xl border border-white/10 bg-white/[0.04] text-[#d5e8ff] shadow-[0_50px_140px_-70px_rgba(45,121,255,0.7)] backdrop-blur-3xl transition-colors',
+        className,
+      )}
+    >
+      <div className="flex flex-wrap items-start justify-between gap-6 border-b border-white/10 bg-white/[0.02] px-8 py-6">
+        <div className="flex flex-1 min-w-0 items-start gap-4">
+          <div className="flex h-12 w-12 items-center justify-center rounded-2xl bg-gradient-to-br from-[#1b3f7c]/80 via-[#254d93]/70 to-[#6aa8ff]/50 shadow-[0_0_30px_rgba(106,168,255,0.35)]">
+            <Bot className="h-6 w-6 text-[#8ec5ff]" />
           </div>
-          <div>
-            <h1 className="text-lg font-semibold text-gray-900 dark:text-gray-100">
-              Thirdweb AI Assistant
+          <div className="space-y-1">
+            <h1 className="text-xl font-semibold tracking-tight text-white">
+              AI Wallet Intelligence Hub
             </h1>
-            <p className="text-sm text-gray-500 dark:text-gray-400">
-              Ask me anything about blockchain, tokens, or smart contracts
+            <p className="text-sm font-medium text-[#b7d8ff]/80">
+              Strategize, sign, and monitor your Web3 transactions with intelligent guidance.
             </p>
           </div>
         </div>
-        <div className="flex-shrink-0">
-          <ConnectButton client={client} />
+        <div className="flex flex-col items-end gap-4 text-right sm:flex-row sm:items-center sm:gap-6">
+          <div className="sm:order-2">
+            <div className="rounded-full border border-white/10 bg-white/[0.06] p-1 shadow-[0_0_25px_rgba(106,168,255,0.3)] backdrop-blur">
+              <ConnectButton client={client} />
+            </div>
+          </div>
+          <div className="sm:order-1">
+            <span className="block text-sm font-semibold uppercase tracking-[0.55em] text-[#d5e8ff] drop-shadow-[0_0_18px_rgba(106,168,255,0.7)]">
+              BeaverXBT
+            </span>
+            <span className="mt-1 block text-xs font-medium text-[#86bbff]">
+              Quantum Trading Network
+            </span>
+          </div>
         </div>
       </div>
 
-      {/* Messages */}
-      <div className="flex-1 overflow-y-auto p-4 space-y-4">
+      <div className="flex-1 space-y-5 overflow-y-auto px-6 py-6">
         {messages.length === 0 && (
-          <div className="text-center py-12">
-            <Bot className="w-12 h-12 text-gray-400 mx-auto mb-4" />
-            <h3 className="text-lg font-medium text-gray-900 dark:text-gray-100 mb-2">
-              Welcome to Thirdweb AI
-            </h3>
-            <p className="text-gray-500 dark:text-gray-400 max-w-md mx-auto">
-              Start a conversation by asking about blockchain development, token operations, 
-              smart contracts, or any Web3-related questions.
+          <div className="rounded-3xl border border-white/10 bg-white/[0.03] px-10 py-12 text-center shadow-[0_30px_100px_-60px_rgba(45,121,255,0.6)]">
+            <div className="mx-auto mb-6 flex h-16 w-16 items-center justify-center rounded-2xl bg-white/[0.08]">
+              <Bot className="h-7 w-7 text-[#8ec5ff]" />
+            </div>
+            <h3 className="text-lg font-semibold text-white">Welcome to BeaverXBT</h3>
+            <p className="mt-3 text-sm text-[#b7d8ff]/80">
+              Initiate a conversation about blockchain development, token operations, on-chain analytics, or any Web3 transaction workflow.
             </p>
           </div>
         )}
 
-        {messages.map((message) => (
+        {messages.map(message => (
           <div
             key={message.id}
-            className={`flex gap-3 ${
-              message.role === 'user' ? 'justify-end' : 'justify-start'
-            }`}
+            className={cn('flex gap-4', message.role === 'user' ? 'justify-end' : 'justify-start')}
           >
             {message.role === 'assistant' && (
-              <div className="flex items-center justify-center w-8 h-8 bg-blue-100 dark:bg-blue-900 rounded-full flex-shrink-0">
-                <Bot className="w-4 h-4 text-blue-600 dark:text-blue-400" />
+              <div className="flex h-10 w-10 flex-shrink-0 items-center justify-center rounded-2xl bg-white/[0.08] shadow-[0_0_18px_rgba(106,168,255,0.45)]">
+                <Bot className="h-5 w-5 text-[#8ec5ff]" />
               </div>
             )}
-            
+
             <div
-              className={`max-w-[70%] rounded-lg px-4 py-2 ${
+              className={cn(
+                'max-w-[70%] rounded-3xl px-5 py-4 text-sm leading-relaxed shadow-lg transition-colors duration-300',
                 message.role === 'user'
-                  ? 'bg-blue-600 text-white'
+                  ? 'bg-gradient-to-r from-[#1b3f7c]/85 via-[#254d93]/85 to-[#6aa8ff]/80 text-white shadow-[0_25px_60px_-35px_rgba(106,168,255,0.8)]'
                   : message.status === 'error'
-                  ? 'bg-red-100 dark:bg-red-900 text-red-900 dark:text-red-100 border border-red-200 dark:border-red-800'
-                  : 'bg-gray-100 dark:bg-gray-800 text-gray-900 dark:text-gray-100'
-              }`}
+                  ? 'border border-red-400/30 bg-[#32172d]/80 text-red-100'
+                  : 'border border-white/10 bg-white/[0.08] text-[#d5e8ff] shadow-[0_30px_80px_-50px_rgba(45,121,255,0.6)]',
+              )}
             >
               {message.content && (
+                <div className="space-y-3 text-sm leading-relaxed text-inherit">
                   <Streamdown>{message.content}</Streamdown>
-              )}
-              
-              {/* Render Images */}
-              {message.images && message.images.length > 0 && (
-                <div className="mt-2 space-y-2">
-                  {message.images.map((image, index) => (
-                    <div key={index} className="relative">
-                      <img
-                        src={image.url}
-                        alt="AI generated content"
-                        className="rounded-lg max-w-full h-auto"
-                        style={{ maxWidth: Math.min(image.width, 400), maxHeight: Math.min(image.height, 300) }}
-                      />
-                    </div>
-                  ))}
                 </div>
               )}
-              
-              {/* Render Actions */}
+
+              {message.images && message.images.length > 0 && (
+                <div className="mt-4 space-y-3">
+                  <div className="flex items-center gap-2 text-xs font-medium uppercase tracking-[0.2em] text-[#86bbff]">
+                    <ImageIcon className="h-3.5 w-3.5" />
+                    Visual context
+                  </div>
+                  <div className="grid gap-3 sm:grid-cols-2">
+                    {message.images.map((image, index) => (
+                      <div key={index} className="overflow-hidden rounded-2xl border border-white/10 bg-white/[0.05]">
+                        <Image
+                          src={image.url}
+                          alt="AI generated content"
+                          width={Math.max(image.width, 1)}
+                          height={Math.max(image.height, 1)}
+                          className="h-auto w-full object-cover"
+                          style={{ maxHeight: Math.min(image.height, 320) }}
+                          unoptimized
+                        />
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+
               {message.actions && message.actions.length > 0 && (
-                <div className="mt-3 space-y-2">
+                <div className="mt-4 space-y-3">
                   {message.actions.map((action, index) => (
-                    <div key={index} className="bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800 rounded-lg p-3">
-                      <div className="flex items-center gap-2 mb-2">
-                        <AlertCircle className="w-4 h-4 text-blue-600 dark:text-blue-400" />
-                        <span className="text-sm font-medium text-blue-900 dark:text-blue-100">
-                          {action.type === 'sign_transaction' && 'Transaction Ready to Sign'}
-                          {action.type === 'sign_swap' && 'Swap Ready to Sign'}
-                          {action.type === 'monitor_transaction' && 'Transaction Monitoring'}
+                    <div
+                      key={index}
+                      className="rounded-2xl border border-white/10 bg-white/[0.06] p-4 shadow-[0_18px_45px_-32px_rgba(45,121,255,0.6)]"
+                    >
+                      <div className="mb-3 flex items-center gap-2 text-[#8ec5ff]">
+                        <AlertCircle className="h-4 w-4" />
+                        <span className="text-xs font-semibold uppercase tracking-[0.3em]">
+                          {action.type === 'sign_transaction' && 'Transaction Ready'}
+                          {action.type === 'sign_swap' && 'Swap Confirmation'}
+                          {action.type === 'monitor_transaction' && 'Transaction Monitor'}
                         </span>
                       </div>
-                      
+
                       {action.type === 'sign_transaction' && (
-                        <div className="text-xs text-blue-800 dark:text-blue-200 space-y-1">
-                          <div><strong>To:</strong> {action.data.to}</div>
-                          <div><strong>Value:</strong> {action.data.value ? `${Number(action.data.value) / 1e18} ETH` : '0 ETH'}</div>
-                          <div><strong>Chain ID:</strong> {action.data.chain_id}</div>
+                        <div className="space-y-1 text-xs text-[#b7d8ff]">
+                          <div><strong className="text-white/90">To:</strong> {action.data.to}</div>
+                          <div>
+                            <strong className="text-white/90">Value:</strong> {action.data.value ? `${Number(action.data.value) / 1e18} ETH` : '0 ETH'}
+                          </div>
+                          <div><strong className="text-white/90">Chain ID:</strong> {action.data.chain_id}</div>
                           {action.data.function && (
-                            <div><strong>Function:</strong> {action.data.function}</div>
+                            <div><strong className="text-white/90">Function:</strong> {action.data.function}</div>
                           )}
                         </div>
                       )}
-                      
+
                       {action.type === 'sign_swap' && (
-                        <div className="text-xs text-blue-800 dark:text-blue-200 space-y-1">
-                          <div><strong>Amount:</strong> {action.data.intent.amount}</div>
-                          <div><strong>From:</strong>{action.data.intent.origin_token_address}</div>
-                          <div><strong>To:</strong>{action.data.intent.destination_token_address}</div>
-                          <div><strong>Chain:</strong> {action.data.intent.destination_chain_id}</div>
+                        <div className="space-y-1 text-xs text-[#b7d8ff]">
+                          <div><strong className="text-white/90">Amount:</strong> {action.data.intent.amount}</div>
+                          <div><strong className="text-white/90">From:</strong> {action.data.intent.origin_token_address}</div>
+                          <div><strong className="text-white/90">To:</strong> {action.data.intent.destination_token_address}</div>
+                          <div><strong className="text-white/90">Chain:</strong> {action.data.intent.destination_chain_id}</div>
                         </div>
                       )}
-                      
+
                       {action.type === 'monitor_transaction' && (
-                        <div className="text-xs text-blue-800 dark:text-blue-200">
-                          <div><strong>Transaction ID:</strong> {action.data.transaction_id}</div>
+                        <div className="text-xs text-[#b7d8ff]">
+                          <div><strong className="text-white/90">Transaction ID:</strong> {action.data.transaction_id}</div>
                         </div>
                       )}
-                      
+
                       {action.type === 'sign_transaction' ? (
                         <TransactionButton
                           transaction={() => prepareTransactionFromAction(action.data)}
                           onTransactionConfirmed={handleTransactionSuccess}
                           onError={handleTransactionError}
-                          className="mt-2 px-3 py-1 bg-blue-600 text-white text-xs rounded hover:bg-blue-700 transition-colors"
+                          className="mt-4 inline-flex items-center justify-center rounded-full bg-gradient-to-r from-[#1b3f7c] to-[#6aa8ff] px-4 py-2 text-xs font-semibold text-white shadow-[0_12px_30px_-20px_rgba(106,168,255,0.8)] transition-transform hover:scale-[1.02]"
                         >
                           Confirm Transaction
                         </TransactionButton>
@@ -469,12 +488,12 @@ export function ChatInterface({ className }: ChatInterfaceProps) {
                           transaction={() => prepareTransactionFromAction(action.data.transaction)}
                           onTransactionConfirmed={handleTransactionSuccess}
                           onError={handleTransactionError}
-                          className="mt-2 px-3 py-1 bg-blue-600 text-white text-xs rounded hover:bg-blue-700 transition-colors"
+                          className="mt-4 inline-flex items-center justify-center rounded-full bg-gradient-to-r from-[#1b3f7c] to-[#6aa8ff] px-4 py-2 text-xs font-semibold text-white shadow-[0_12px_30px_-20px_rgba(106,168,255,0.8)] transition-transform hover:scale-[1.02]"
                         >
                           Confirm Swap
                         </TransactionButton>
                       ) : (
-                        <button className="mt-2 px-3 py-1 bg-blue-600 text-white text-xs rounded hover:bg-blue-700 transition-colors">
+                        <button className="mt-4 inline-flex items-center justify-center rounded-full border border-white/20 bg-transparent px-4 py-2 text-xs font-semibold text-[#d5e8ff] transition-colors hover:border-white/40">
                           View Transaction
                         </button>
                       )}
@@ -482,59 +501,49 @@ export function ChatInterface({ className }: ChatInterfaceProps) {
                   ))}
                 </div>
               )}
-              
-              <div className="flex items-center gap-2 text-xs opacity-70 mt-1">
+
+              <div className="mt-3 flex items-center gap-2 text-[11px] font-medium text-[#7fa3d4]">
                 <span>{message.timestamp.toLocaleTimeString()}</span>
-                {message.status === 'sending' && (
-                  <span className="text-blue-500">Sending...</span>
-                )}
-                {message.status === 'error' && (
-                  <span className="text-red-500">Error</span>
-                )}
+                {message.status === 'sending' && <span className="text-[#8ec5ff]">Streaming…</span>}
+                {message.status === 'error' && <span className="text-red-300">Error</span>}
               </div>
             </div>
 
             {message.role === 'user' && (
-              <div className="flex items-center justify-center w-8 h-8 bg-gray-100 dark:bg-gray-800 rounded-full flex-shrink-0">
-                <User className="w-4 h-4 text-gray-600 dark:text-gray-400" />
+              <div className="flex h-10 w-10 flex-shrink-0 items-center justify-center rounded-2xl bg-gradient-to-br from-[#0f2f5d] to-[#1b3f7c] text-white shadow-[0_0_18px_rgba(106,168,255,0.35)]">
+                <User className="h-5 w-5" />
               </div>
             )}
           </div>
         ))}
 
-        {/* Thinking indicator */}
         {isThinking === true && thinkingMessage && (
-          <div className="flex gap-3 justify-start">
-            <div className="flex items-center justify-center w-8 h-8 bg-blue-100 dark:bg-blue-900 rounded-full flex-shrink-0">
-              <Bot className="w-4 h-4 text-blue-600 dark:text-blue-400" />
+          <div className="flex gap-4">
+            <div className="flex h-10 w-10 flex-shrink-0 items-center justify-center rounded-2xl bg-white/[0.08] shadow-[0_0_18px_rgba(106,168,255,0.45)]">
+              <Bot className="h-5 w-5 text-[#8ec5ff]" />
             </div>
-            <div className="bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800 rounded-lg px-4 py-2 max-w-[70%]">
-              <div className="flex items-center gap-2">
-                <div className="flex space-x-1">
-                  <div className="w-1.5 h-1.5 bg-blue-500 rounded-full animate-pulse"></div>
-                  <div className="w-1.5 h-1.5 bg-blue-500 rounded-full animate-pulse" style={{ animationDelay: '0.2s' }}></div>
-                  <div className="w-1.5 h-1.5 bg-blue-500 rounded-full animate-pulse" style={{ animationDelay: '0.4s' }}></div>
+            <div className="max-w-[60%] rounded-3xl border border-white/10 bg-white/[0.07] px-5 py-4 text-sm text-[#b7d8ff] shadow-[0_25px_60px_-40px_rgba(45,121,255,0.65)]">
+              <div className="flex items-center gap-3">
+                <div className="flex items-center gap-1.5">
+                  <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-[#6aa8ff]" style={{ animationDelay: '0s' }} />
+                  <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-[#6aa8ff]/80" style={{ animationDelay: '0.2s' }} />
+                  <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-[#6aa8ff]/60" style={{ animationDelay: '0.4s' }} />
                 </div>
-                <span className="text-sm text-blue-700 dark:text-blue-300 italic">
-                  {thinkingMessage}
-                </span>
+                <span className="italic">{thinkingMessage}</span>
               </div>
             </div>
           </div>
         )}
 
-        {/* Loading indicator (only when not thinking) */}
         {isLoading && !isThinking && (
-          <div className="flex gap-3 justify-start">
-            <div className="flex items-center justify-center w-8 h-8 bg-blue-100 dark:bg-blue-900 rounded-full flex-shrink-0">
-              <Bot className="w-4 h-4 text-blue-600 dark:text-blue-400" />
+          <div className="flex gap-4">
+            <div className="flex h-10 w-10 flex-shrink-0 items-center justify-center rounded-2xl bg-white/[0.08] shadow-[0_0_18px_rgba(106,168,255,0.45)]">
+              <Bot className="h-5 w-5 text-[#8ec5ff]" />
             </div>
-            <div className="bg-gray-100 dark:bg-gray-800 rounded-lg px-4 py-2">
-              <div className="flex space-x-1">
-                <div className="w-2 h-2 bg-gray-400 rounded-full animate-bounce"></div>
-                <div className="w-2 h-2 bg-gray-400 rounded-full animate-bounce" style={{ animationDelay: '0.1s' }}></div>
-                <div className="w-2 h-2 bg-gray-400 rounded-full animate-bounce" style={{ animationDelay: '0.2s' }}></div>
-              </div>
+            <div className="flex items-center gap-1 rounded-3xl border border-white/10 bg-white/[0.07] px-5 py-3 text-[#b7d8ff] shadow-[0_25px_60px_-40px_rgba(45,121,255,0.65)]">
+              <span className="h-2 w-2 animate-bounce rounded-full bg-[#6aa8ff]" />
+              <span className="h-2 w-2 animate-bounce rounded-full bg-[#6aa8ff]" style={{ animationDelay: '0.12s' }} />
+              <span className="h-2 w-2 animate-bounce rounded-full bg-[#6aa8ff]" style={{ animationDelay: '0.24s' }} />
             </div>
           </div>
         )}
@@ -542,33 +551,32 @@ export function ChatInterface({ className }: ChatInterfaceProps) {
         <div ref={messagesEndRef} />
       </div>
 
-      {/* Input */}
-      <div className="border-t border-gray-200 dark:border-gray-700 p-4">
-        <form onSubmit={handleSubmit} className="flex gap-2">
-          <div className="flex-1 relative">
+      <div className="border-t border-white/10 bg-white/[0.02] px-6 py-6">
+        <form onSubmit={handleSubmit} className="flex flex-col gap-3 sm:flex-row sm:items-end">
+          <div className="relative flex-1">
             <textarea
               ref={textareaRef}
               value={input}
-              onChange={(e) => setInput(e.target.value)}
+              onChange={event => setInput(event.target.value)}
               onKeyDown={handleKeyDown}
-              placeholder="Ask me anything about Web3, blockchain, or smart contracts..."
-              className="w-full px-4 py-3 pr-12 border border-gray-300 dark:border-gray-600 rounded-lg resize-none focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent dark:bg-gray-800 dark:text-gray-100 dark:placeholder-gray-400"
+              placeholder="Craft your Web3 request or trading strategy..."
+              className="w-full resize-none rounded-2xl border border-white/15 bg-white/[0.05] px-5 py-3 pr-12 text-sm text-white placeholder:text-[#7fa3d4] focus:border-[#6aa8ff] focus:outline-none focus:ring-2 focus:ring-[#6aa8ff]/50"
               rows={1}
-              style={{ minHeight: '48px', maxHeight: '120px' }}
+              style={{ minHeight: '52px', maxHeight: '160px' }}
               disabled={isLoading}
             />
             <button
               type="submit"
               disabled={!input.trim() || isLoading}
-              className="absolute right-2 top-1/2 transform -translate-y-1/2 p-2 text-gray-400 hover:text-blue-600 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+              className="absolute right-3 top-1/2 -translate-y-1/2 rounded-full bg-[#1b3f7c]/60 p-2 text-[#7fa3d4] transition-colors hover:bg-[#254d93]/70 hover:text-white disabled:cursor-not-allowed disabled:opacity-50"
             >
-              <Send className="w-4 h-4" />
+              <Send className="h-4 w-4" />
             </button>
           </div>
+          <p className="text-xs font-medium text-[#7fa3d4] sm:text-right">
+            Press Enter to send · Shift + Enter for a new line
+          </p>
         </form>
-        <p className="text-xs text-gray-500 dark:text-gray-400 mt-2 text-center">
-          Press Enter to send, Shift+Enter for new line
-        </p>
       </div>
     </div>
   );
