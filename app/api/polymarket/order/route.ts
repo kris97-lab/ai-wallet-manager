@@ -20,27 +20,51 @@ export async function POST(req: NextRequest) {
       );
     }
 
+    const requestPayload = {
+      market: marketId,
+      outcome,
+      side,
+      price,
+      size,
+      type: "market",
+    };
+
     const res = await fetch("https://clob.polymarket.com/orders", {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
         "X-API-Key": API_KEY,
       },
-      body: JSON.stringify({
-        market: marketId,
-        outcome,
-        side,
-        price,
-        size,
-        type: "market",
-      }),
+      body: JSON.stringify(requestPayload),
     });
 
     const json = await res.json();
     if (!res.ok) {
+      console.error("Polymarket order error", {
+        status: res.status,
+        response: json,
+        request: requestPayload,
+      });
+
       return NextResponse.json(
-        { error: json.error || "Order rejected" },
-        { status: 400 }
+        {
+          ok: false,
+          polymarketError: {
+            status: res.status,
+            error: json?.error ?? null,
+            message: json?.message ?? null,
+            code: json?.code ?? null,
+            details: json?.details ?? null,
+            request: {
+              marketId,
+              outcome,
+              side,
+              price,
+              size,
+            },
+          },
+        },
+        { status: res.status }
       );
     }
 
