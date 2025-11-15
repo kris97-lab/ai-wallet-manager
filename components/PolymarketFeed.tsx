@@ -5,6 +5,7 @@ import { useEffect, useRef } from "react";
 import useSWR from "swr";
 
 import { cn } from "@/lib/utils";
+import "@/styles/feed-animation.css";
 
 interface PolymarketTrade {
   id: string;
@@ -183,7 +184,7 @@ export function PolymarketFeed({ className }: { className?: string }) {
               key={trade.id}
               className={cn(
                 "rounded-2xl border border-white/10 bg-white/5 p-4 shadow-[0_8px_30px_rgba(10,30,70,0.28)] transition-transform duration-300 hover:-translate-y-1 hover:border-sky-200/40 hover:bg-white/10",
-                isAnimating(trade.id) ? "feed-fade-in" : "opacity-90"
+                isAnimating(trade.id) ? "fade-in" : "opacity-90"
               )}
             >
               <div className="flex items-start justify-between gap-3">

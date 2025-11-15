@@ -8,6 +8,9 @@ type ActivityPayload = {
   title?: unknown;
   timestamp?: unknown;
   market?: unknown;
+  asset?: unknown;
+  eventSlug?: unknown;
+  slug?: unknown;
   url?: unknown;
 };
 
@@ -111,8 +114,19 @@ function buildTrade(payload: ActivityPayload): PolymarketTrade | null {
 
   const id = parseString(payload.id) ?? `${Date.now()}-${Math.random()}`;
   const outcome = parseString(payload.outcome) ?? "";
-  const market = parseString(payload.title ?? payload.market) ?? "";
-  const url = parseString(payload.url) ?? undefined;
+  const title =
+    parseString(payload.title) ??
+    parseString(payload.asset) ??
+    parseString(payload.market) ??
+    "Unknown market";
+  const eventSlug = parseString(payload.eventSlug);
+  const slug = parseString(payload.slug);
+  let url: string | undefined;
+  if (eventSlug) {
+    url = `https://polymarket.com/event/${eventSlug}`;
+  } else if (slug) {
+    url = `https://polymarket.com/market/${slug}`;
+  }
   const ts = parseTimestamp(payload.timestamp);
 
   return {
@@ -121,7 +135,7 @@ function buildTrade(payload: ActivityPayload): PolymarketTrade | null {
     amountUSD,
     outcome,
     price,
-    market,
+    market: title,
     url,
   };
 }
@@ -186,7 +200,28 @@ function connect(state: NonNullable<GlobalState["__polymarketWSState__"]>) {
 
     const globalRef = globalThis as GlobalState;
     const feed = globalRef.polymarketFeed ?? [];
-    globalRef.polymarketFeed = [trade, ...feed].slice(0, MAX_TRADES);
+    const combined = [trade, ...feed];
+    const seen = new Set<string>();
+    const deduped: PolymarketTrade[] = [];
+
+    for (const item of combined) {
+      if (seen.has(item.id)) {
+        continue;
+      }
+      seen.add(item.id);
+      deduped.push(item);
+    }
+
+    deduped.sort((a, b) => {
+      const timeA = Date.parse(a.ts);
+      const timeB = Date.parse(b.ts);
+      if (Number.isNaN(timeA) || Number.isNaN(timeB)) {
+        return a.ts > b.ts ? -1 : a.ts < b.ts ? 1 : 0;
+      }
+      return timeB - timeA;
+    });
+
+    globalRef.polymarketFeed = deduped.slice(0, MAX_TRADES);
   });
 
   socket.on("error", (err) => {
