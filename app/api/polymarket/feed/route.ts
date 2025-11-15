@@ -1,23 +1,38 @@
+import "@/lib/polymarket/serverInit";
 import { NextResponse } from "next/server";
-import { startPolymarketStream, getTrades } from "@/lib/polymarket-ws";
 
-export const revalidate = 0;
+export const dynamic = "force-dynamic";
 
-let streamStarted = false;
+type PolymarketTrade = {
+  id: string;
+  ts: string;
+  amountUSD: number;
+  outcome: string;
+  price: number;
+  market: string;
+  url?: string;
+};
 
-function initializeStream() {
-  if (!streamStarted) {
-    startPolymarketStream();
-    streamStarted = true;
-  }
+type GlobalState = typeof globalThis & {
+  polymarketFeed?: PolymarketTrade[];
+};
+
+function getLatestTrades(): PolymarketTrade[] {
+  const globalRef = globalThis as GlobalState;
+  const trades = globalRef.polymarketFeed ?? [];
+  return trades.slice(0, 50);
 }
 
-initializeStream();
-
 export async function GET() {
-  const trades = Array.from(getTrades());
+  const trades = getLatestTrades();
+  const lastSync = trades.length > 0 ? trades[0].ts : null;
+
   return NextResponse.json(
-    { trades },
+    {
+      ok: true,
+      lastSync,
+      trades,
+    },
     {
       headers: {
         "Cache-Control": "no-store",
