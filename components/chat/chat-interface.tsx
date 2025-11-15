@@ -10,76 +10,26 @@ import { client } from '@/components/providers/thirdweb-provider';
 import { prepareTransaction } from 'thirdweb';
 import { defineChain } from 'thirdweb/chains';
 import { cn } from '@/lib/utils';
-
-interface Message {
-  id: string;
-  role: 'user' | 'assistant';
-  content: string;
-  timestamp: Date;
-  actions?: ActionEvent[];
-  images?: ImageEvent[];
-  status?: 'sending' | 'sent' | 'error';
-}
-
-type TransactionPayload = {
-  to: string;
-  chain_id: number;
-  value?: string;
-  data?: string;
-  function?: string;
-};
-
-type SignSwapIntent = {
-  amount: string;
-  origin_token_address: string;
-  destination_token_address: string;
-  destination_chain_id: string;
-};
-
-type SignSwapPayload = {
-  intent: SignSwapIntent;
-  transaction: TransactionPayload;
-};
-
-type MonitorTransactionPayload = {
-  transaction_id: string;
-};
-
-type ActionEvent =
-  | {
-      type: 'sign_transaction';
-      data: TransactionPayload;
-      request_id: string;
-      session_id: string;
-    }
-  | {
-      type: 'sign_swap';
-      data: SignSwapPayload;
-      request_id: string;
-      session_id: string;
-    }
-  | {
-      type: 'monitor_transaction';
-      data: MonitorTransactionPayload;
-      request_id: string;
-      session_id: string;
-    };
-
-interface ImageEvent {
-  url: string;
-  width: number;
-  height: number;
-}
+import {
+  useChatHistoryStore,
+  selectActiveChat,
+  type ChatMessage,
+} from '@/store/chatHistory';
+import type {
+  ActionEvent,
+  ImageEvent,
+  TransactionPayload,
+} from '@/types/chat';
 
 interface ChatInterfaceProps {
   className?: string;
 }
 
+const EMPTY_MESSAGES: ChatMessage[] = [];
+
 export function ChatInterface({ className }: ChatInterfaceProps) {
-  const [messages, setMessages] = useState<Message[]>([]);
   const [input, setInput] = useState('');
   const [isLoading, setIsLoading] = useState(false);
-  const [sessionId, setSessionId] = useState<string | null>(null);
   const [, setCurrentRequestId] = useState<string | null>(null);
   const [thinkingMessage, setThinkingMessage] = useState<string | null>(null);
   const [isThinking, setIsThinking] = useState(false);
@@ -88,6 +38,25 @@ export function ChatInterface({ className }: ChatInterfaceProps) {
 
   const activeAccount = useActiveAccount();
   const activeChain = useActiveWalletChain();
+  const activeChat = useChatHistoryStore(selectActiveChat);
+  const activeChatId = useChatHistoryStore(state => state.activeChatId);
+  const createSession = useChatHistoryStore(state => state.createSession);
+  const addMessageToStore = useChatHistoryStore(state => state.addMessage);
+  const updateMessageInStore = useChatHistoryStore(state => state.updateMessage);
+  const setSessionIdForChat = useChatHistoryStore(state => state.setSessionId);
+  const messages = activeChat?.messages ?? EMPTY_MESSAGES;
+  const sessionId = activeChat?.sessionId ?? null;
+
+  useEffect(() => {
+    if (!activeChatId) {
+      createSession(activeAccount?.address ?? null);
+    }
+  }, [activeChatId, createSession, activeAccount?.address]);
+
+  const generateMessageId = () =>
+    typeof crypto !== 'undefined' && 'randomUUID' in crypto
+      ? crypto.randomUUID()
+      : `${Date.now()}-${Math.random().toString(16).slice(2)}`;
 
   const prepareTransactionFromAction = (actionData: TransactionPayload) => {
     return prepareTransaction({
@@ -128,30 +97,40 @@ export function ChatInterface({ className }: ChatInterfaceProps) {
       return;
     }
 
-    const userMessage: Message = {
-      id: Date.now().toString(),
+    let chatId = activeChatId;
+    if (!chatId) {
+      chatId = createSession(activeAccount?.address ?? null);
+    }
+
+    if (!chatId) {
+      return;
+    }
+
+    const now = new Date();
+    const userMessage: ChatMessage = {
+      id: generateMessageId(),
       role: 'user',
       content: input.trim(),
-      timestamp: new Date(),
+      timestamp: now.toISOString(),
       status: 'sent',
     };
 
-    setMessages(prev => [...prev, userMessage]);
+    addMessageToStore(chatId, userMessage);
     setInput('');
     setIsLoading(true);
 
-    const assistantMessageId = (Date.now() + 1).toString();
-    const assistantMessage: Message = {
+    const assistantMessageId = generateMessageId();
+    const assistantMessage: ChatMessage = {
       id: assistantMessageId,
       role: 'assistant',
       content: '',
-      timestamp: new Date(),
+      timestamp: new Date(now.getTime() + 1).toISOString(),
       status: 'sending',
       actions: [],
       images: [],
     };
 
-    setMessages(prev => [...prev, assistantMessage]);
+    addMessageToStore(chatId, assistantMessage);
 
     try {
       const events = await stream('/api/chat', {
@@ -190,7 +169,7 @@ export function ChatInterface({ className }: ChatInterfaceProps) {
           switch (event.event) {
             case 'init': {
               if (typeof parsedEventData.session_id === 'string') {
-                setSessionId(parsedEventData.session_id);
+                setSessionIdForChat(chatId, parsedEventData.session_id);
               }
               if (typeof parsedEventData.request_id === 'string') {
                 setCurrentRequestId(parsedEventData.request_id);
@@ -208,13 +187,10 @@ export function ChatInterface({ className }: ChatInterfaceProps) {
 
             case 'delta': {
               if (typeof parsedEventData.v === 'string') {
-                setMessages(prev =>
-                  prev.map(msg =>
-                    msg.id === assistantMessageId
-                      ? { ...msg, content: msg.content + parsedEventData.v }
-                      : msg
-                  )
-                );
+                updateMessageInStore(chatId, assistantMessageId, message => ({
+                  ...message,
+                  content: message.content + parsedEventData.v,
+                }));
               }
               break;
             }
@@ -227,13 +203,10 @@ export function ChatInterface({ className }: ChatInterfaceProps) {
                 session_id: typeof parsedEventData.session_id === 'string' ? parsedEventData.session_id : '',
               } as ActionEvent;
 
-              setMessages(prev =>
-                prev.map(msg =>
-                  msg.id === assistantMessageId
-                    ? { ...msg, actions: [...(msg.actions || []), actionData] }
-                    : msg
-                )
-              );
+              updateMessageInStore(chatId, assistantMessageId, message => ({
+                ...message,
+                actions: [...(message.actions ?? []), actionData],
+              }));
               break;
             }
 
@@ -244,13 +217,10 @@ export function ChatInterface({ className }: ChatInterfaceProps) {
                 height: typeof parsedEventData.height === 'number' ? parsedEventData.height : Number(parsedEventData.height ?? 512),
               };
 
-              setMessages(prev =>
-                prev.map(msg =>
-                  msg.id === assistantMessageId
-                    ? { ...msg, images: [...(msg.images || []), imageData] }
-                    : msg
-                )
-              );
+              updateMessageInStore(chatId, assistantMessageId, message => ({
+                ...message,
+                images: [...(message.images ?? []), imageData],
+              }));
               break;
             }
 
@@ -262,18 +232,14 @@ export function ChatInterface({ className }: ChatInterfaceProps) {
               setIsThinking(false);
               setThinkingMessage(null);
 
-              setMessages(prev =>
-                prev.map(msg =>
-                  msg.id === assistantMessageId
-                    ? {
-                        ...msg,
-                        content:
-                          msg.content + '\\n\\n❌ Error: ' + (typeof parsedEventData.data === 'string' ? parsedEventData.data : 'An error occurred'),
-                        status: 'error',
-                      }
-                    : msg
-                )
-              );
+              updateMessageInStore(chatId, assistantMessageId, message => ({
+                ...message,
+                content:
+                  message.content +
+                  '\\n\\n❌ Error: ' +
+                  (typeof parsedEventData.data === 'string' ? parsedEventData.data : 'An error occurred'),
+                status: 'error',
+              }));
               break;
             }
 
@@ -281,13 +247,10 @@ export function ChatInterface({ className }: ChatInterfaceProps) {
               setIsThinking(false);
               setThinkingMessage(null);
 
-              setMessages(prev =>
-                prev.map(msg =>
-                  msg.id === assistantMessageId
-                    ? { ...msg, status: 'sent' }
-                    : msg
-                )
-              );
+              updateMessageInStore(chatId, assistantMessageId, message => ({
+                ...message,
+                status: 'sent',
+              }));
               break;
             }
           }
@@ -300,17 +263,13 @@ export function ChatInterface({ className }: ChatInterfaceProps) {
       setIsThinking(false);
       setThinkingMessage(null);
 
-      setMessages(prev =>
-        prev.map(msg =>
-          msg.id === assistantMessageId
-            ? {
-                ...msg,
-                content: 'Sorry, I encountered an error while processing your request. Please try again.',
-                status: 'error',
-              }
-            : msg
-        )
-      );
+      updateMessageInStore(chatId, assistantMessageId, message => ({
+        ...message,
+        content:
+          message.content ||
+          'Sorry, I encountered an error while processing your request. Please try again.',
+        status: 'error',
+      }));
     } finally {
       setIsLoading(false);
     }
@@ -503,7 +462,7 @@ export function ChatInterface({ className }: ChatInterfaceProps) {
               )}
 
               <div className="mt-3 flex items-center gap-2 text-[11px] font-medium text-[#7fa3d4]">
-                <span>{message.timestamp.toLocaleTimeString()}</span>
+                <span>{new Date(message.timestamp).toLocaleTimeString()}</span>
                 {message.status === 'sending' && <span className="text-[#8ec5ff]">Streaming…</span>}
                 {message.status === 'error' && <span className="text-red-300">Error</span>}
               </div>
