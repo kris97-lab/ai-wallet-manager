@@ -93,7 +93,7 @@ export function MarketCard({ trade, highlighted, onTrade }: MarketCardProps) {
           onClick={onTrade}
           className="rounded-xl bg-gradient-to-r from-[#1b3f7c] via-[#254d93] to-[#6aa8ff] px-4 py-1.5 text-xs font-semibold text-white shadow-[0_10px_30px_-20px_rgba(106,168,255,0.7)] transition hover:brightness-110"
         >
-          Trade via AI
+          Trade Now
         </button>
       </div>
     </li>

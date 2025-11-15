@@ -5,10 +5,15 @@ import useSWR from "swr";
 
 import { cn } from "@/lib/utils";
 import type { PolymarketTrade } from "@/lib/polymarket";
-import { useChatHistoryStore, type OrderReceiptInput } from "@/store/chatHistory";
+import { useChatHistoryStore } from "@/store/chatHistory";
+import type { ChatMessage } from "@/types/chat";
 import { useToast } from "@/components/Toast";
 import { MarketCard } from "./PolymarketFeed/MarketCard";
-import { PolymarketOrderModal, type OrderModalTrade } from "./modals/PolymarketOrderModal";
+import {
+  PolymarketOrderModal,
+  type OrderModalTrade,
+  type OrderModalResult,
+} from "./modals/PolymarketOrderModal";
 import "@/styles/feed-animation.css";
 
 interface PolymarketFeedResponse {
@@ -137,6 +142,26 @@ const normalizeOutcomeIndex = (trade: PolymarketTrade) => {
 
 const normalizeSide = (side: string) => (side?.trim().toUpperCase() === "SELL" ? "SELL" : "BUY");
 
+const formatCurrency = (value: number) =>
+  value.toLocaleString("en-US", {
+    style: "currency",
+    currency: "USD",
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+  });
+
+const formatPrice = (value?: number | null) => {
+  if (typeof value !== "number" || Number.isNaN(value)) {
+    return "Market";
+  }
+  return value.toFixed(value >= 1 ? 2 : 4);
+};
+
+const createMessageId = () =>
+  typeof crypto !== "undefined" && "randomUUID" in crypto
+    ? crypto.randomUUID()
+    : `${Date.now()}-${Math.random().toString(16).slice(2)}`;
+
 export function PolymarketFeed({ className, isWalletConnected }: PolymarketFeedProps) {
   const { data, error } = useSWR<PolymarketTrade[]>(
     isWalletConnected ? "/api/polymarket/feed" : null,
@@ -151,6 +176,8 @@ export function PolymarketFeed({ className, isWalletConnected }: PolymarketFeedP
   const trades = data ?? [];
   const isAnimating = useFadeTracker(trades);
   const addOrderReceipt = useChatHistoryStore(state => state.addOrderReceipt);
+  const addChatMessage = useChatHistoryStore(state => state.addMessage);
+  const activeChatId = useChatHistoryStore(state => state.activeChatId);
   const { error: showError } = useToast();
   const [selectedTrade, setSelectedTrade] = useState<OrderModalTrade | null>(null);
 
@@ -181,10 +208,39 @@ export function PolymarketFeed({ className, isWalletConnected }: PolymarketFeedP
   );
 
   const handleOrderComplete = useCallback(
-    (receipt: OrderReceiptInput) => {
-      addOrderReceipt(receipt);
+    (result: OrderModalResult) => {
+      addOrderReceipt(result.receipt);
+
+      if (!activeChatId) {
+        return;
+      }
+
+      const outcomeLabel =
+        result.receipt.outcome ??
+        (result.receipt.outcomeIndex === 0 ? "NO" : "YES");
+      const messageLines = [
+        "Order executed on Polymarket",
+        `• Market: ${result.receipt.market ?? "Polymarket market"}`,
+        `• Outcome: ${outcomeLabel} (${result.receipt.side})`,
+        `• Price: ${formatPrice(result.price ?? result.receipt.price)}`,
+        `• Size: ${formatCurrency(result.receipt.size)}`,
+        `• Timestamp: ${new Date(result.executedAt).toLocaleString()}`,
+      ];
+      if (result.orderId) {
+        messageLines.push(`• Order ID: ${result.orderId}`);
+      }
+
+      const message: ChatMessage = {
+        id: createMessageId(),
+        role: "assistant",
+        content: messageLines.join("\n"),
+        timestamp: new Date(result.executedAt).toISOString(),
+        status: "sent",
+      };
+
+      addChatMessage(activeChatId, message);
     },
-    [addOrderReceipt]
+    [activeChatId, addChatMessage, addOrderReceipt]
   );
 
   if (!isWalletConnected) {
@@ -258,8 +314,8 @@ export function PolymarketFeed({ className, isWalletConnected }: PolymarketFeedP
         isOpen={Boolean(selectedTrade)}
         trade={selectedTrade}
         onClose={() => setSelectedTrade(null)}
-        onSuccess={receipt => {
-          handleOrderComplete(receipt);
+        onSuccess={result => {
+          handleOrderComplete(result);
           setSelectedTrade(null);
         }}
       />

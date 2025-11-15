@@ -5,6 +5,7 @@ import { Loader2, X } from "lucide-react";
 
 import { submitPolymarketOrder } from "@/lib/polymarket/submitOrder";
 import type { OrderReceiptInput } from "@/store/chatHistory";
+import { usePolymarketBalance } from "@/hooks/usePolymarketBalance";
 import { useToast } from "@/components/Toast";
 
 export interface OrderModalTrade {
@@ -17,11 +18,18 @@ export interface OrderModalTrade {
   defaultAmount?: number;
 }
 
+export interface OrderModalResult {
+  receipt: OrderReceiptInput;
+  orderId?: string | null;
+  executedAt: string;
+  price?: number | null;
+}
+
 interface PolymarketOrderModalProps {
   isOpen: boolean;
   trade: OrderModalTrade | null;
   onClose: () => void;
-  onSuccess?: (receipt: OrderReceiptInput) => void;
+  onSuccess?: (result: OrderModalResult) => void;
 }
 
 export function PolymarketOrderModal({
@@ -33,6 +41,7 @@ export function PolymarketOrderModal({
   const [amount, setAmount] = useState<string>("");
   const [isSubmitting, setIsSubmitting] = useState(false);
   const { success, error } = useToast();
+  const { balance } = usePolymarketBalance(isOpen);
 
   useEffect(() => {
     if (trade?.defaultAmount) {
@@ -54,29 +63,49 @@ export function PolymarketOrderModal({
       return;
     }
 
-    setIsSubmitting(true);
-    const result = await submitPolymarketOrder({
-      marketId: trade.marketId,
-      outcomeIndex: trade.outcomeIndex,
-      side: trade.side,
-      size: parsed,
-      price: null,
-    });
-    setIsSubmitting(false);
-
-    if (!result.ok) {
-      error(result.error ?? "Order rejected by Polymarket.");
+    const availableBalance = balance?.available ?? balance?.cash;
+    if (typeof availableBalance === "number" && availableBalance < parsed) {
+      error("Not enough balance on Polymarket");
       return;
     }
 
-    success("Order successfully submitted to Polymarket CLOB.");
-    onSuccess?.({
+    setIsSubmitting(true);
+    const result = await submitPolymarketOrder(
+      {
+        marketId: trade.marketId,
+        outcomeIndex: trade.outcomeIndex,
+        side: trade.side,
+        size: parsed,
+        price: null,
+      },
+      {
+        onSuccess: () => success("Order placed!"),
+        onError: message => error(message),
+      }
+    );
+    setIsSubmitting(false);
+
+    if (!result.ok) {
+      return;
+    }
+
+    const executedAt = new Date().toISOString();
+    const resolvedPrice = result.price ?? trade.referencePrice ?? null;
+    const receipt: OrderReceiptInput = {
       marketId: trade.marketId,
       outcomeIndex: trade.outcomeIndex,
       side: trade.side,
       size: parsed,
       market: trade.market,
       outcome: trade.outcome,
+      price: resolvedPrice,
+      orderId: result.orderId ?? undefined,
+    };
+    onSuccess?.({
+      receipt,
+      orderId: result.orderId ?? null,
+      executedAt,
+      price: resolvedPrice,
     });
     onClose();
   };

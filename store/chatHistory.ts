@@ -12,6 +12,8 @@ export interface OrderReceiptInput {
   size: number;
   market?: string;
   outcome?: string;
+  price?: number | null;
+  orderId?: string;
 }
 
 export interface OrderReceipt extends OrderReceiptInput {

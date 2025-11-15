@@ -42,6 +42,7 @@ import {
   selectActiveChat,
   type ChatMessage,
 } from '@/store/chatHistory';
+import { usePolymarketBalance } from '@/hooks/usePolymarketBalance';
 import type {
   ActionEvent,
   ImageEvent,
@@ -106,6 +107,9 @@ export const ChatInterface = forwardRef<ChatInterfaceHandle, ChatInterfaceProps>
   const activeAccount = useActiveAccount();
   const activeChain = useActiveWalletChain();
   const requestSwitchChain = useSwitchActiveWalletChain();
+  const isWalletConnected = Boolean(activeAccount);
+  const { balance: polymarketBalance, loading: balanceLoading } =
+    usePolymarketBalance(isWalletConnected);
 
   const fetchUsdcBalance = useCallback(async (): Promise<bigint | null> => {
     const address = activeAccount?.address;
@@ -766,14 +770,34 @@ export const ChatInterface = forwardRef<ChatInterfaceHandle, ChatInterfaceProps>
             BeaverXBT
           </div>
         </div>
-        <div className="neon-text rounded-xl border border-white/20 bg-white/5 px-5 py-1.5 transition-all hover:border-white/40">
-          <ConnectButton
-            client={client}
-            connectButton={{
-              className:
-                'neon-text !bg-transparent !border-none !shadow-none !text-white !font-semibold !px-6 !py-2 !rounded-[18px] !transition-all',
-            }}
-          />
+        <div className="flex items-center gap-3">
+          {isWalletConnected && (
+            <div
+              className={cn(
+                'rounded-full border px-4 py-1.5 text-xs font-semibold tracking-wide shadow-[0_0_18px_rgba(106,168,255,0.25)] backdrop-blur',
+                balanceLoading
+                  ? 'border-white/30 text-white/70'
+                  : (polymarketBalance?.cash ?? 0) > 0
+                  ? 'border-emerald-400/40 bg-emerald-400/10 text-emerald-100'
+                  : 'border-rose-400/50 bg-rose-500/10 text-rose-100'
+              )}
+            >
+              {balanceLoading
+                ? 'Syncing balance…'
+                : (polymarketBalance?.cash ?? 0) > 0
+                ? `Cash: $${(polymarketBalance?.cash ?? 0).toFixed(2)}`
+                : '$0.00 — deposit required'}
+            </div>
+          )}
+          <div className="neon-text rounded-xl border border-white/20 bg-white/5 px-5 py-1.5 transition-all hover:border-white/40">
+            <ConnectButton
+              client={client}
+              connectButton={{
+                className:
+                  'neon-text !bg-transparent !border-none !shadow-none !text-white !font-semibold !px-6 !py-2 !rounded-[18px] !transition-all',
+              }}
+            />
+          </div>
         </div>
       </header>
 
