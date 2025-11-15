@@ -23,6 +23,39 @@ export default function Home() {
     }
   }, [hasManualToggle, isWalletConnected]);
 
+  useEffect(() => {
+    if (!isWalletConnected) {
+      return;
+    }
+
+    const win = window as typeof window & {
+      __polyLoginStarted?: boolean;
+    };
+
+    if (win.__polyLoginStarted) {
+      return;
+    }
+
+    win.__polyLoginStarted = true;
+
+    const popup = window.open(
+      "/api/polymarket/login",
+      "polylogin",
+      "width=380,height=500"
+    );
+
+    const timer = window.setInterval(() => {
+      if (popup && popup.closed) {
+        window.clearInterval(timer);
+        window.location.reload();
+      }
+    }, 300);
+
+    return () => {
+      window.clearInterval(timer);
+    };
+  }, [isWalletConnected]);
+
   const leftColumnWidth = isWalletConnected && showChatHistory ? 260 : 0;
   const rightColumnWidth = isWalletConnected ? 380 : 0;
   const gridTemplateColumns = `${leftColumnWidth}px 1fr ${rightColumnWidth}px`;
