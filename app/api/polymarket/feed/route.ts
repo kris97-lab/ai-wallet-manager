@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server';
 
-const POLYMARKET_TRADES_URL = 'https://clob.polymarket.com/trades?minSize=800';
+const POLYMARKET_FEED_URL =
+  process.env.NEXT_PUBLIC_POLY_FEED ?? 'https://api-v2.moonapi.xyz/polymarket/feed';
 
 interface NormalizedTrade {
   id: string;
@@ -48,15 +49,15 @@ const toTimestamp = (value: unknown): string => {
 };
 
 const normalizeTrade = (trade: UnknownRecord): NormalizedTrade | null => {
-  const id = toString(trade.id ?? trade.transactionHash ?? trade.txid);
-  const market = toString(trade.market ?? trade.marketQuestion ?? trade.question);
-  const outcome = toString(trade.outcome ?? trade.outcomeName ?? trade.asset);
-  const side = toString(trade.side ?? trade.orderType ?? trade.type);
-  const size = toNumber(trade.size ?? trade.quoteAmount ?? trade.usdcSize);
-  const price = toNumber(trade.price ?? trade.avgPrice ?? trade.executionPrice);
-  const timestamp = toTimestamp(trade.timestamp ?? trade.createdAt ?? trade.time);
-  const maker = toString(trade.maker ?? trade.makerAddress ?? trade.makerUser);
-  const taker = toString(trade.taker ?? trade.takerAddress ?? trade.takerUser);
+  const id = toString(trade.id);
+  const market = toString(trade.market);
+  const outcome = toString(trade.outcome);
+  const side = toString(trade.side);
+  const size = toNumber(trade.size);
+  const price = toNumber(trade.price);
+  const timestamp = toTimestamp(trade.timestamp);
+  const maker = toString(trade.maker);
+  const taker = toString(trade.taker);
 
   if (
     !id ||
@@ -65,9 +66,7 @@ const normalizeTrade = (trade: UnknownRecord): NormalizedTrade | null => {
     !side ||
     size === null ||
     price === null ||
-    !timestamp ||
-    !maker ||
-    !taker
+    !timestamp
   ) {
     return null;
   }
@@ -87,7 +86,7 @@ const normalizeTrade = (trade: UnknownRecord): NormalizedTrade | null => {
 
 export async function GET() {
   try {
-    const response = await fetch(POLYMARKET_TRADES_URL, {
+    const response = await fetch(POLYMARKET_FEED_URL, {
       cache: 'no-store',
       headers: {
         accept: 'application/json',
@@ -102,16 +101,8 @@ export async function GET() {
       );
     }
 
-    const payload = (await response.json()) as {
-      data?: { trades?: unknown };
-      trades?: unknown;
-    } | null;
-
-    const tradesPayload = payload?.data?.trades ?? payload?.trades ?? [];
-
-    if (!Array.isArray(tradesPayload)) {
-      return NextResponse.json({ trades: [] });
-    }
+    const payload = (await response.json()) as { trades?: unknown } | null;
+    const tradesPayload = Array.isArray(payload?.trades) ? payload?.trades : [];
 
     const trades = tradesPayload
       .map((entry) => {
