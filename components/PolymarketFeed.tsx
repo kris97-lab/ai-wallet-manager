@@ -159,9 +159,17 @@ function formatTimestamp(ts: string) {
   return `${diffDays}d ago`;
 }
 
-export function PolymarketFeed({ className }: { className?: string }) {
+interface PolymarketFeedProps {
+  className?: string;
+  isWalletConnected: boolean;
+}
+
+export function PolymarketFeed({
+  className,
+  isWalletConnected,
+}: PolymarketFeedProps) {
   const { data, error } = useSWR<PolymarketTrade[]>(
-    "/api/polymarket/feed",
+    isWalletConnected ? "/api/polymarket/feed" : null,
     fetcher,
     {
       refreshInterval: 10_000,
@@ -172,6 +180,19 @@ export function PolymarketFeed({ className }: { className?: string }) {
 
   const trades = data ?? [];
   const isAnimating = useFadeTracker(trades);
+
+  if (!isWalletConnected) {
+    return (
+      <div
+        className={cn(
+          "flex min-h-[160px] items-center justify-center rounded-2xl border border-white/10 bg-white/5 px-6 text-center text-sm text-sky-200/80",
+          className
+        )}
+      >
+        Connect wallet to unlock the BeaverXBT live Polymarket feed.
+      </div>
+    );
+  }
 
   if (!data && !error) {
     return (
