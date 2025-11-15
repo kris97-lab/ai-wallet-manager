@@ -29,7 +29,6 @@ export type PolymarketOrderStatus =
   | 'error';
 
 export type PolymarketOrderPayload = {
-  market: string;
   marketId: string;
   side: 'buy' | 'sell';
   outcome: 'YES' | 'NO';
@@ -37,7 +36,21 @@ export type PolymarketOrderPayload = {
   price?: number | null;
   sizeUSDC: number;
   status?: PolymarketOrderStatus;
+  marketLabel?: string;
 };
+
+export interface TradePromptPayload {
+  message: string;
+  marketId: string;
+  market: string;
+  outcome: 'YES' | 'NO';
+  outcomeId: string;
+  side: 'buy' | 'sell';
+  price: number;
+  amountUSDC: number;
+  slug?: string;
+  url?: string;
+}
 
 export type ActionEvent =
   | {

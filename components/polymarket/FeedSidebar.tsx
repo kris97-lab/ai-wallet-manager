@@ -2,11 +2,12 @@
 
 import { cn } from "@/lib/utils";
 import { PolymarketFeed } from "../PolymarketFeed";
+import type { TradePromptPayload } from "@/types/chat";
 
 interface FeedSidebarProps {
   className?: string;
   isWalletConnected: boolean;
-  onTrade?: (message: string) => void;
+  onTrade?: (payload: TradePromptPayload) => void;
 }
 
 export function FeedSidebar({ className, isWalletConnected, onTrade }: FeedSidebarProps) {

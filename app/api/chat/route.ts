@@ -27,7 +27,6 @@ For every Polymarket trade request you must follow these rules:
      "type": "polymarket_order",
      "data": {
        "marketId": "…",
-       "market": "…",
        "outcome": "YES" | "NO",
        "side": "buy" | "sell",
        "price": <number or null>,

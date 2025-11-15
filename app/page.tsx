@@ -7,6 +7,7 @@ import { ChatHistoryPanel } from "@/components/chat/ChatHistoryPanel";
 import { ChatHistoryToggle } from "@/components/chat/ChatHistoryToggle";
 import { FeedSidebar } from "@/components/polymarket/FeedSidebar";
 import { useActiveAccount } from "thirdweb/react";
+import type { TradePromptPayload } from "@/types/chat";
 
 export default function Home() {
   const activeAccount = useActiveAccount();
@@ -15,8 +16,8 @@ export default function Home() {
   const [hasManualToggle, setHasManualToggle] = useState(false);
   const chatInterfaceRef = useRef<ChatInterfaceHandle>(null);
 
-  const handleTradeViaAI = useCallback((message: string) => {
-    chatInterfaceRef.current?.handleExternalMessage(message);
+  const handleTradeViaAI = useCallback((payload: TradePromptPayload) => {
+    chatInterfaceRef.current?.handleExternalTrade(payload);
   }, []);
 
   useEffect(() => {

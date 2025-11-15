@@ -21,11 +21,16 @@ export interface RawTrade {
   question?: string;
   marketId?: string | number;
   market_id?: string | number;
+  cid?: string;
   slug?: string;
   marketSlug?: string;
   market_slug?: string;
   eventSlug?: string;
   event_slug?: string;
+  outcomeId?: string | number;
+  outcome_id?: string | number;
+  outcomeToken?: string | number;
+  outcome_token?: string | number;
   maker?: string;
   makerAddress?: string;
   maker_address?: string;
@@ -41,6 +46,7 @@ export interface PolymarketTrade {
   amountUSD: number;
   price: number;
   outcome: string;
+  outcomeId: string;
   market: string;
   marketId: string;
   maker: string;
@@ -139,15 +145,47 @@ function normalizeTrade(raw: RawTrade): PolymarketTrade | null {
   const tsCandidate = raw.timestamp ?? raw.ts ?? raw.createdAt ?? null;
   const isoTimestamp = tsToIso(tsCandidate) || new Date().toISOString();
 
+  const normalizedOutcome = typeof raw.outcome === "string" ? raw.outcome.trim().toUpperCase() : "";
+  const resolvedOutcomeId =
+    raw.outcomeId != null
+      ? String(raw.outcomeId)
+      : raw.outcome_id != null
+      ? String(raw.outcome_id)
+      : raw.outcomeToken != null
+      ? String(raw.outcomeToken)
+      : raw.outcome_token != null
+      ? String(raw.outcome_token)
+      : normalizedOutcome === "NO"
+      ? "0"
+      : normalizedOutcome === "YES"
+      ? "1"
+      : "";
+
+  const resolvedMarketId =
+    raw.marketId != null
+      ? String(raw.marketId)
+      : raw.market_id != null
+      ? String(raw.market_id)
+      : typeof raw.cid === "string" && raw.cid.length > 0
+      ? raw.cid
+      : slug.length > 0
+      ? slug
+      : eventSlug.length > 0
+      ? eventSlug
+      : typeof raw.market === "string" && raw.market.length > 0
+      ? raw.market
+      : String(idSource);
+
   return {
     id: String(idSource),
     ts: isoTimestamp,
     side: typeof raw.side === "string" ? raw.side : "",
     amountUSD,
     price,
-    outcome: typeof raw.outcome === "string" ? raw.outcome : "",
+    outcome: normalizedOutcome,
+    outcomeId: resolvedOutcomeId,
     market: raw.title ?? raw.asset ?? raw.market ?? raw.question ?? "Unknown market",
-    marketId: raw.marketId != null ? String(raw.marketId) : raw.market_id != null ? String(raw.market_id) : "",
+    marketId: resolvedMarketId,
     maker: raw.maker ?? raw.makerAddress ?? raw.maker_address ?? "",
     url: resolveUrl(slug, eventSlug),
     slug,

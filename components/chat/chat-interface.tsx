@@ -47,6 +47,7 @@ import type {
   ImageEvent,
   TransactionPayload,
   PolymarketOrderStatus,
+  TradePromptPayload,
 } from '@/types/chat';
 
 interface ChatInterfaceProps {
@@ -54,7 +55,7 @@ interface ChatInterfaceProps {
 }
 
 export interface ChatInterfaceHandle {
-  handleExternalMessage: (message: string) => void;
+  handleExternalTrade: (payload: TradePromptPayload) => void;
 }
 
 const EMPTY_MESSAGES: ChatMessage[] = [];
@@ -80,7 +81,7 @@ export const ChatInterface = forwardRef<ChatInterfaceHandle, ChatInterfaceProps>
         sessionId: string;
         payload: {
           marketId: string;
-          market: string;
+          marketLabel: string;
           outcome: 'YES' | 'NO';
           outcomeId?: string;
           side: 'buy' | 'sell';
@@ -91,6 +92,7 @@ export const ChatInterface = forwardRef<ChatInterfaceHandle, ChatInterfaceProps>
       }
     >()
   );
+  const latestPolymarketPromptRef = useRef<TradePromptPayload | null>(null);
   const usdcContract = useMemo(
     () =>
       getContract({
@@ -337,10 +339,9 @@ export const ChatInterface = forwardRef<ChatInterfaceHandle, ChatInterfaceProps>
         return;
       }
 
-      const { marketId, market, outcome, outcomeId, side, sizeUSDC, price } = action.data;
+      const { marketId, outcome, outcomeId, side, sizeUSDC, price, marketLabel } = action.data;
       if (
         !marketId ||
-        !market ||
         !outcome ||
         !side ||
         typeof sizeUSDC !== 'number' ||
@@ -349,6 +350,40 @@ export const ChatInterface = forwardRef<ChatInterfaceHandle, ChatInterfaceProps>
       ) {
         return;
       }
+
+      const computedMarketLabel =
+        typeof marketLabel === 'string' && marketLabel.length > 0
+          ? marketLabel
+          : latestPolymarketPromptRef.current?.market && latestPolymarketPromptRef.current.market.length > 0
+          ? latestPolymarketPromptRef.current.market
+          : `Polymarket market ${marketId}`;
+
+      updateMessageInStore(chatId, assistantId, message => {
+        if (!message.actions) {
+          return message;
+        }
+
+        return {
+          ...message,
+          actions: message.actions.map(existing => {
+            if (
+              existing.request_id === action.request_id &&
+              existing.session_id === action.session_id &&
+              existing.type === 'polymarket_order'
+            ) {
+              return {
+                ...existing,
+                data: {
+                  ...existing.data,
+                  marketLabel: computedMarketLabel,
+                },
+              };
+            }
+
+            return existing;
+          }),
+        };
+      });
 
       const orderKey = `${action.session_id}:${action.request_id}`;
       if (processedPolymarketOrdersRef.current.has(orderKey)) {
@@ -364,7 +399,7 @@ export const ChatInterface = forwardRef<ChatInterfaceHandle, ChatInterfaceProps>
         sessionId: action.session_id,
         payload: {
           marketId,
-          market,
+          marketLabel: computedMarketLabel,
           outcome,
           outcomeId,
           side,
@@ -409,6 +444,7 @@ export const ChatInterface = forwardRef<ChatInterfaceHandle, ChatInterfaceProps>
       processedPolymarketOrdersRef,
       submitPolymarketOrder,
       updatePolymarketActionStatus,
+      updateMessageInStore,
     ]
   );
 
@@ -461,7 +497,7 @@ export const ChatInterface = forwardRef<ChatInterfaceHandle, ChatInterfaceProps>
   );
 
   const submitMessage = useCallback(
-    async (contentOverride?: string) => {
+    async (contentOverride?: string, metadata?: Record<string, unknown>) => {
       const messageContent = (contentOverride ?? input).trim();
       if (!messageContent || isLoading) {
         return;
@@ -503,6 +539,16 @@ export const ChatInterface = forwardRef<ChatInterfaceHandle, ChatInterfaceProps>
       addMessageToStore(chatId, assistantMessage);
 
       try {
+        const contextPayload: Record<string, unknown> = {
+          session_id: sessionId,
+          from: activeAccount?.address,
+          chain_ids: activeChain?.id ? [activeChain.id] : undefined,
+        };
+
+        if (metadata && Object.keys(metadata).length > 0) {
+          contextPayload.polymarket_metadata = metadata;
+        }
+
         const events = await stream('/api/chat', {
           method: 'POST',
           headers: {
@@ -515,11 +561,7 @@ export const ChatInterface = forwardRef<ChatInterfaceHandle, ChatInterfaceProps>
                 content: messageContent,
               },
             ],
-            context: {
-              session_id: sessionId,
-              from: activeAccount?.address,
-              chain_ids: activeChain?.id ? [activeChain.id] : undefined,
-            },
+            context: contextPayload,
           }),
         });
 
@@ -668,14 +710,26 @@ export const ChatInterface = forwardRef<ChatInterfaceHandle, ChatInterfaceProps>
     ]
   );
 
-  const handleExternalMessage = useCallback(
-    (message: string) => {
-      const trimmed = message.trim();
+  const handleExternalTrade = useCallback(
+    (payload: TradePromptPayload) => {
+      const trimmed = payload.message.trim();
       if (!trimmed) {
         return;
       }
-      setInput(trimmed);
-      void submitMessage(trimmed);
+
+      latestPolymarketPromptRef.current = payload;
+      setInput('');
+      void submitMessage(trimmed, {
+        marketId: payload.marketId,
+        outcomeId: payload.outcomeId,
+        outcome: payload.outcome,
+        side: payload.side,
+        price: payload.price,
+        amountUSDC: payload.amountUSDC,
+        market: payload.market,
+        slug: payload.slug,
+        url: payload.url,
+      });
     },
     [submitMessage]
   );
@@ -683,9 +737,9 @@ export const ChatInterface = forwardRef<ChatInterfaceHandle, ChatInterfaceProps>
   useImperativeHandle(
     ref,
     () => ({
-      handleExternalMessage,
+      handleExternalTrade,
     }),
-    [handleExternalMessage]
+    [handleExternalTrade]
   );
   const handleSubmit = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
@@ -790,7 +844,7 @@ export const ChatInterface = forwardRef<ChatInterfaceHandle, ChatInterfaceProps>
                     <div className="mt-4 space-y-3">
                       {message.actions.map((action, index) => {
                         if (action.type === 'polymarket_order') {
-                          const { market, side, outcome, sizeUSDC, status } = action.data;
+                          const { marketLabel, side, outcome, sizeUSDC, status } = action.data;
 
                           const stage = status ?? 'awaiting_swap';
                           const swapState =
@@ -856,7 +910,7 @@ export const ChatInterface = forwardRef<ChatInterfaceHandle, ChatInterfaceProps>
                                     <p className="text-xs font-semibold uppercase tracking-[0.3em] text-[#8ec5ff]">
                                       Polymarket Order
                                     </p>
-                                    <p className="mt-1 text-sm font-semibold text-white">{market || 'Unspecified market'}</p>
+                                    <p className="mt-1 text-sm font-semibold text-white">{marketLabel || 'Unspecified market'}</p>
                                   </div>
                                 </div>
                                 <span className="rounded-full border border-white/20 bg-white/[0.08] px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.25em] text-white/90">

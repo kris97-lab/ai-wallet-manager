@@ -5,6 +5,7 @@ import useSWR from "swr";
 
 import { cn } from "@/lib/utils";
 import type { PolymarketTrade } from "@/lib/polymarket";
+import type { TradePromptPayload } from "@/types/chat";
 import "@/styles/feed-animation.css";
 
 interface PolymarketFeedResponse {
@@ -162,7 +163,7 @@ function formatTimestamp(ts: string) {
 interface PolymarketFeedProps {
   className?: string;
   isWalletConnected: boolean;
-  onTrade?: (message: string) => void;
+  onTrade?: (payload: TradePromptPayload) => void;
 }
 
 export function PolymarketFeed({
@@ -292,14 +293,43 @@ export function PolymarketFeed({
                   return;
                 }
 
-                const side = (trade.side || '').trim().toUpperCase();
-                const outcome = (trade.outcome || '').trim();
-                const message = `Place Polymarket order: ${side} ${outcome} on '${trade.market}' for $${amount}. Market order.`
-                  .replace(/\s+/g, ' ')
+                const normalizedSide = (trade.side || '').trim().toLowerCase() === 'sell' ? 'sell' : 'buy';
+                const normalizedOutcome = (trade.outcome || '').trim().toUpperCase() === 'NO' ? 'NO' : 'YES';
+                const outcomeId =
+                  trade.outcomeId && trade.outcomeId.length > 0
+                    ? trade.outcomeId
+                    : normalizedOutcome === 'NO'
+                    ? '0'
+                    : '1';
+                const resolvedMarketId =
+                  trade.marketId && trade.marketId.length > 0
+                    ? trade.marketId
+                    : trade.slug && trade.slug.length > 0
+                    ? trade.slug
+                    : trade.id;
+                const referencePrice = Number.isFinite(trade.price) ? trade.price : 0;
+                const message = [
+                  `Place Polymarket order: ${normalizedSide.toUpperCase()} ${normalizedOutcome} on '${trade.market}' for $${amount}. Market order.`,
+                  `Market ID: ${resolvedMarketId}`,
+                  `Outcome Token: ${outcomeId}`,
+                  `Reference Price: ${formatPrice(referencePrice)}`,
+                ]
+                  .join('\n')
                   .trim();
 
                 if (onTrade) {
-                  onTrade(message);
+                  onTrade({
+                    message,
+                    marketId: resolvedMarketId,
+                    market: trade.market,
+                    outcome: normalizedOutcome,
+                    outcomeId,
+                    side: normalizedSide,
+                    price: referencePrice,
+                    amountUSDC: amount,
+                    slug: trade.slug,
+                    url: trade.url,
+                  });
                   return;
                 }
                 console.log(message);
