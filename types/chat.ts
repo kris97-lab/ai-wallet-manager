@@ -22,6 +22,16 @@ export type MonitorTransactionPayload = {
   transaction_id: string;
 };
 
+export type PolymarketOrderStatus = 'swap' | 'order_submitted' | 'completed';
+
+export type PolymarketOrderPayload = {
+  market: string;
+  side: string;
+  outcome?: string;
+  amountUSD?: number;
+  status?: PolymarketOrderStatus;
+};
+
 export type ActionEvent =
   | {
       type: 'sign_transaction';
@@ -38,6 +48,12 @@ export type ActionEvent =
   | {
       type: 'monitor_transaction';
       data: MonitorTransactionPayload;
+      request_id: string;
+      session_id: string;
+    }
+  | {
+      type: 'polymarket_order';
+      data: PolymarketOrderPayload;
       request_id: string;
       session_id: string;
     };

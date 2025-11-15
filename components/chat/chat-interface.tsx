@@ -10,7 +10,17 @@ import {
   type FormEvent,
   type KeyboardEvent,
 } from 'react';
-import { Send, Bot, User, AlertCircle, Image as ImageIcon } from 'lucide-react';
+import {
+  Send,
+  Bot,
+  User,
+  AlertCircle,
+  Image as ImageIcon,
+  Sparkles,
+  Loader2,
+  CheckCircle2,
+  Circle,
+} from 'lucide-react';
 import Image from 'next/image';
 import { stream } from 'fetch-event-stream';
 import { Streamdown } from 'streamdown';
@@ -518,71 +528,159 @@ export const ChatInterface = forwardRef<ChatInterfaceHandle, ChatInterfaceProps>
 
                   {message.actions && message.actions.length > 0 && (
                     <div className="mt-4 space-y-3">
-                      {message.actions.map((action, index) => (
-                        <div
-                          key={index}
-                          className="rounded-2xl border border-white/10 bg-white/[0.06] p-4 shadow-[0_18px_45px_-32px_rgba(45,121,255,0.6)]"
-                        >
-                          <div className="mb-3 flex items-center gap-2 text-[#8ec5ff]">
-                            <AlertCircle className="h-4 w-4" />
-                            <span className="text-xs font-semibold uppercase tracking-[0.3em]">
-                              {action.type.replace('_', ' ')}
-                            </span>
-                          </div>
+                      {message.actions.map((action, index) => {
+                        if (action.type === 'polymarket_order') {
+                          const { market, side, outcome, amountUSD, status } = action.data;
+                          const stage = status ?? 'swap';
+                          const swapStatus = stage === 'swap' ? 'in_progress' : 'complete';
+                          const orderStatus =
+                            stage === 'order_submitted'
+                              ? 'in_progress'
+                              : stage === 'completed'
+                              ? 'complete'
+                              : 'pending';
 
-                          {action.type === 'sign_transaction' && (
-                            <div className="space-y-1 text-xs text-[#b7d8ff]">
-                              <div><strong className="text-white/90">To:</strong> {action.data.to}</div>
-                              <div>
-                                <strong className="text-white/90">Value:</strong> {action.data.value ? `${Number(action.data.value) / 1e18} ETH` : '0 ETH'}
+                          const formattedAmount =
+                            typeof amountUSD === 'number' && Number.isFinite(amountUSD)
+                              ? `$${amountUSD.toLocaleString(undefined, { maximumFractionDigits: 2 })}`
+                              : '—';
+                          const outcomeLabel = outcome ? outcome.toUpperCase() : '—';
+
+                          const renderStatusIcon = (state: 'pending' | 'in_progress' | 'complete') => {
+                            if (state === 'complete') {
+                              return <CheckCircle2 className="h-3.5 w-3.5 text-[#8ec5ff]" />;
+                            }
+                            if (state === 'in_progress') {
+                              return <Loader2 className="h-3.5 w-3.5 animate-spin text-[#9abffd]" />;
+                            }
+                            return <Circle className="h-3 w-3 text-[#3b527b]" />;
+                          };
+
+                          return (
+                            <div
+                              key={index}
+                              className="rounded-2xl border border-white/10 bg-white/[0.06] p-4 shadow-[0_18px_45px_-32px_rgba(45,121,255,0.6)]"
+                            >
+                              <div className="flex items-start justify-between gap-3">
+                                <div className="flex items-center gap-2 text-[#8ec5ff]">
+                                  <Sparkles className="h-4 w-4" />
+                                  <div>
+                                    <p className="text-xs font-semibold uppercase tracking-[0.3em] text-[#8ec5ff]">
+                                      Polymarket Order
+                                    </p>
+                                    <p className="mt-1 text-sm font-semibold text-white">{market || 'Unspecified market'}</p>
+                                  </div>
+                                </div>
+                                <span className="rounded-full border border-white/20 bg-white/[0.08] px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.25em] text-white/90">
+                                  {side ? side.toUpperCase() : '—'}
+                                </span>
                               </div>
-                              <div><strong className="text-white/90">Chain ID:</strong> {action.data.chain_id}</div>
-                              {action.data.function && (
-                                <div><strong className="text-white/90">Function:</strong> {action.data.function}</div>
-                              )}
+                              <div className="mt-3 grid gap-2 text-xs text-[#b7d8ff] sm:text-sm">
+                                <div>
+                                  <strong className="text-white/90">Outcome:</strong> {outcomeLabel}
+                                </div>
+                                <div>
+                                  <strong className="text-white/90">Amount:</strong> {formattedAmount}
+                                </div>
+                              </div>
+                              <div className="mt-4 space-y-2 text-xs">
+                                <div
+                                  className={cn(
+                                    'flex items-center gap-2 transition-colors',
+                                    swapStatus === 'complete'
+                                      ? 'text-[#8ec5ff]'
+                                      : swapStatus === 'in_progress'
+                                      ? 'text-[#9abffd]'
+                                      : 'text-[#7fa3d4]'
+                                  )}
+                                >
+                                  {renderStatusIcon(swapStatus)}
+                                  <span>Swapping tokens…</span>
+                                </div>
+                                <div
+                                  className={cn(
+                                    'flex items-center gap-2 transition-colors',
+                                    orderStatus === 'complete'
+                                      ? 'text-[#8ec5ff]'
+                                      : orderStatus === 'in_progress'
+                                      ? 'text-[#9abffd]'
+                                      : 'text-[#7fa3d4]'
+                                  )}
+                                >
+                                  {renderStatusIcon(orderStatus)}
+                                  <span>Order submitted</span>
+                                </div>
+                              </div>
                             </div>
-                          )}
+                          );
+                        }
 
-                          {action.type === 'sign_swap' && (
-                            <div className="space-y-1 text-xs text-[#b7d8ff]">
-                              <div><strong className="text-white/90">Amount:</strong> {action.data.intent.amount}</div>
-                              <div><strong className="text-white/90">From:</strong> {action.data.intent.origin_token_address}</div>
-                              <div><strong className="text-white/90">To:</strong> {action.data.intent.destination_token_address}</div>
-                              <div><strong className="text-white/90">Chain:</strong> {action.data.intent.destination_chain_id}</div>
+                        return (
+                          <div
+                            key={index}
+                            className="rounded-2xl border border-white/10 bg-white/[0.06] p-4 shadow-[0_18px_45px_-32px_rgba(45,121,255,0.6)]"
+                          >
+                            <div className="mb-3 flex items-center gap-2 text-[#8ec5ff]">
+                              <AlertCircle className="h-4 w-4" />
+                              <span className="text-xs font-semibold uppercase tracking-[0.3em]">
+                                {action.type.replace('_', ' ')}
+                              </span>
                             </div>
-                          )}
 
-                          {action.type === 'monitor_transaction' && (
-                            <div className="text-xs text-[#b7d8ff]">
-                              <div><strong className="text-white/90">Transaction ID:</strong> {action.data.transaction_id}</div>
-                            </div>
-                          )}
+                            {action.type === 'sign_transaction' && (
+                              <div className="space-y-1 text-xs text-[#b7d8ff]">
+                                <div><strong className="text-white/90">To:</strong> {action.data.to}</div>
+                                <div>
+                                  <strong className="text-white/90">Value:</strong> {action.data.value ? `${Number(action.data.value) / 1e18} ETH` : '0 ETH'}
+                                </div>
+                                <div><strong className="text-white/90">Chain ID:</strong> {action.data.chain_id}</div>
+                                {action.data.function && (
+                                  <div><strong className="text-white/90">Function:</strong> {action.data.function}</div>
+                                )}
+                              </div>
+                            )}
 
-                          {action.type === 'sign_transaction' ? (
-                            <TransactionButton
-                              transaction={() => prepareTransactionFromAction(action.data)}
-                              onTransactionConfirmed={handleTransactionSuccess}
-                              onError={handleTransactionError}
-                              className="mt-4 inline-flex items-center justify-center rounded-full bg-gradient-to-r from-[#1b3f7c] to-[#6aa8ff] px-4 py-2 text-xs font-semibold text-white shadow-[0_12px_30px_-20px_rgba(106,168,255,0.8)] transition-transform hover:scale-[1.02]"
-                            >
-                              Confirm Transaction
-                            </TransactionButton>
-                          ) : action.type === 'sign_swap' ? (
-                            <TransactionButton
-                              transaction={() => prepareTransactionFromAction(action.data.transaction)}
-                              onTransactionConfirmed={handleTransactionSuccess}
-                              onError={handleTransactionError}
-                              className="mt-4 inline-flex items-center justify-center rounded-full bg-gradient-to-r from-[#1b3f7c] to-[#6aa8ff] px-4 py-2 text-xs font-semibold text-white shadow-[0_12px_30px_-20px_rgba(106,168,255,0.8)] transition-transform hover:scale-[1.02]"
-                            >
-                              Confirm Swap
-                            </TransactionButton>
-                          ) : (
-                            <button className="mt-4 inline-flex items-center justify-center rounded-full border border-white/20 bg-transparent px-4 py-2 text-xs font-semibold text-[#d5e8ff] transition-colors hover:border-white/40">
-                              View Transaction
-                            </button>
-                          )}
-                        </div>
-                      ))}
+                            {action.type === 'sign_swap' && (
+                              <div className="space-y-1 text-xs text-[#b7d8ff]">
+                                <div><strong className="text-white/90">Amount:</strong> {action.data.intent.amount}</div>
+                                <div><strong className="text-white/90">From:</strong> {action.data.intent.origin_token_address}</div>
+                                <div><strong className="text-white/90">To:</strong> {action.data.intent.destination_token_address}</div>
+                                <div><strong className="text-white/90">Chain:</strong> {action.data.intent.destination_chain_id}</div>
+                              </div>
+                            )}
+
+                            {action.type === 'monitor_transaction' && (
+                              <div className="text-xs text-[#b7d8ff]">
+                                <div><strong className="text-white/90">Transaction ID:</strong> {action.data.transaction_id}</div>
+                              </div>
+                            )}
+
+                            {action.type === 'sign_transaction' ? (
+                              <TransactionButton
+                                transaction={() => prepareTransactionFromAction(action.data)}
+                                onTransactionConfirmed={handleTransactionSuccess}
+                                onError={handleTransactionError}
+                                className="mt-4 inline-flex items-center justify-center rounded-full bg-gradient-to-r from-[#1b3f7c] to-[#6aa8ff] px-4 py-2 text-xs font-semibold text-white shadow-[0_12px_30px_-20px_rgba(106,168,255,0.8)] transition-transform hover:scale-[1.02]"
+                              >
+                                Confirm Transaction
+                              </TransactionButton>
+                            ) : action.type === 'sign_swap' ? (
+                              <TransactionButton
+                                transaction={() => prepareTransactionFromAction(action.data.transaction)}
+                                onTransactionConfirmed={handleTransactionSuccess}
+                                onError={handleTransactionError}
+                                className="mt-4 inline-flex items-center justify-center rounded-full bg-gradient-to-r from-[#1b3f7c] to-[#6aa8ff] px-4 py-2 text-xs font-semibold text-white shadow-[0_12px_30px_-20px_rgba(106,168,255,0.8)] transition-transform hover:scale-[1.02]"
+                              >
+                                Confirm Swap
+                              </TransactionButton>
+                            ) : (
+                              <button className="mt-4 inline-flex items-center justify-center rounded-full border border-white/20 bg-transparent px-4 py-2 text-xs font-semibold text-[#d5e8ff] transition-colors hover:border-white/40">
+                                View Transaction
+                              </button>
+                            )}
+                          </div>
+                        );
+                      })}
                     </div>
                   )}
 
