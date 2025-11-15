@@ -202,6 +202,7 @@ export function PolymarketFeed({ className, isWalletConnected }: PolymarketFeedP
           Number.isFinite(trade.amountUSD) && trade.amountUSD > 0
             ? Math.round(trade.amountUSD)
             : undefined,
+        slug: trade.slug,
       });
     },
     [showError]

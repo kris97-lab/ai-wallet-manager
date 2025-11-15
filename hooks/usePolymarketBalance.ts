@@ -2,29 +2,21 @@
 
 import useSWR from "swr";
 
-interface BalanceResponse {
-  cash: number;
-  positions: number;
-  available: number;
-}
+import type { PolymarketBalanceSnapshot } from "@/lib/polymarket/tradeEngine";
+import { polymarketTradeEngine } from "@/lib/polymarket/tradeEngine";
 
-const fetcher = async (url: string): Promise<BalanceResponse> => {
-  const res = await fetch(url, { cache: "no-store" });
-  if (!res.ok) {
-    throw new Error("Failed to fetch Polymarket balance");
+const balanceFetcher = async (): Promise<PolymarketBalanceSnapshot> => {
+  const snapshot = await polymarketTradeEngine.getBalance();
+  if (!snapshot) {
+    throw new Error("Unable to fetch Polymarket balance");
   }
-  const data = (await res.json()) as BalanceResponse;
-  return {
-    cash: Number(data.cash ?? 0),
-    positions: Number(data.positions ?? 0),
-    available: Number(data.available ?? 0),
-  };
+  return snapshot;
 };
 
 export function usePolymarketBalance(enabled = true) {
-  const { data, error } = useSWR<BalanceResponse>(
-    enabled ? "/api/polymarket/balance" : null,
-    fetcher,
+  const { data, error, isLoading, mutate } = useSWR<PolymarketBalanceSnapshot>(
+    enabled ? "polymarket-balance" : null,
+    balanceFetcher,
     {
       refreshInterval: 10_000,
       dedupingInterval: 5_000,
@@ -34,7 +26,8 @@ export function usePolymarketBalance(enabled = true) {
 
   return {
     balance: data ?? null,
-    loading: enabled && !error && !data,
+    loading: Boolean(enabled && !data && !error && isLoading),
     error: error ?? null,
+    refresh: mutate,
   };
 }

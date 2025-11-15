@@ -16,6 +16,7 @@ export interface OrderModalTrade {
   side: "BUY" | "SELL";
   referencePrice: number | null;
   defaultAmount?: number;
+  slug?: string;
 }
 
 export interface OrderModalResult {
@@ -77,6 +78,7 @@ export function PolymarketOrderModal({
         side: trade.side,
         size: parsed,
         price: null,
+        slug: trade.slug,
       },
       {
         onSuccess: () => success("Order placed!"),
