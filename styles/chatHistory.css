@@ -9,6 +9,13 @@
   animation: chatHistorySlideIn 0.55s cubic-bezier(0.25, 0.9, 0.3, 1) forwards;
 }
 
+.chat-history-panel-shell[data-wallet-connected='false'] {
+  opacity: 0;
+  transform: translateX(-32px);
+  pointer-events: none;
+  visibility: hidden;
+}
+
 @keyframes chatHistorySlideIn {
   0% {
     opacity: 0;

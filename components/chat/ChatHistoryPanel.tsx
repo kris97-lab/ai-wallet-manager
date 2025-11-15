@@ -2,7 +2,7 @@
 
 import "@/styles/chatHistory.css";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import { cn } from "@/lib/utils";
 import { useChatHistoryStore, type ChatSession } from "@/store/chatHistory";
@@ -50,14 +50,23 @@ export function ChatHistoryPanel({
   const createSession = useChatHistoryStore(state => state.createSession);
 
   const sortedChats = useMemo(() => sortChats(chats), [chats]);
-
   const [hasAnimated, setHasAnimated] = useState(isWalletConnected);
+  const itemRefs = useRef<Record<string, HTMLButtonElement | null>>({});
 
   useEffect(() => {
-    if (isWalletConnected) {
-      setHasAnimated(true);
-    }
+    setHasAnimated(isWalletConnected);
   }, [isWalletConnected]);
+
+  useEffect(() => {
+    if (!isWalletConnected || !activeChatId) {
+      return;
+    }
+
+    const target = itemRefs.current[activeChatId];
+    if (target) {
+      target.scrollIntoView({ behavior: "smooth", block: "nearest" });
+    }
+  }, [activeChatId, isWalletConnected, sortedChats.length]);
 
   const handleCreateSession = useCallback(() => {
     const id = createSession(walletAddress ?? undefined);
@@ -71,6 +80,7 @@ export function ChatHistoryPanel({
         hasAnimated && "wallet-connected",
         className
       )}
+      aria-hidden={!isWalletConnected}
       data-wallet-connected={isWalletConnected}
     >
       <div className="flex flex-1 flex-col overflow-hidden rounded-3xl border border-white/10 bg-gradient-to-b from-[#0b1b3a]/90 to-[#0f2f5d]/90 shadow-[0_0_32px_rgba(48,128,255,0.14)] backdrop-blur-2xl">
@@ -112,6 +122,13 @@ export function ChatHistoryPanel({
                           : "hover:border-white/15 hover:bg-white/[0.08]"
                       )}
                       data-active={isActive}
+                      ref={node => {
+                        if (node) {
+                          itemRefs.current[chat.id] = node;
+                        } else {
+                          delete itemRefs.current[chat.id];
+                        }
+                      }}
                     >
                       <div className="flex items-center justify-between gap-3 text-xs text-[#86bbff]/80">
                         <span

@@ -29,6 +29,10 @@ export function FeedSidebar({ className, isWalletConnected }: FeedSidebarProps) 
   const [isOpen, setIsOpen] = useState(false);
   const panelId = useId();
 
+  if (!isWalletConnected) {
+    return null;
+  }
+
   return (
     <aside className={cn("w-full lg:w-[360px] lg:flex-none lg:self-stretch", className)}>
       <div className="hidden lg:block">
