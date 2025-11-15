@@ -206,21 +206,6 @@
   }
 }
 
-@keyframes orbFadeIn {
-  0% {
-    opacity: 0;
-    filter: blur(10px);
-  }
-  100% {
-    opacity: 1;
-    filter: blur(0px);
-  }
-}
-
-.orb-fade-in {
-  animation: orbFadeIn 0.65s ease-out;
-}
-
 @keyframes feedFadeIn {
   0% {
     opacity: 0;

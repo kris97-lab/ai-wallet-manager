@@ -1,26 +1,16 @@
 "use client";
 
-import type { ReactNode } from "react";
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useState } from "react";
 import useSWR from "swr";
 
 import { cn } from "@/lib/utils";
+import type { PolymarketTrade } from "@/lib/polymarket";
 import "@/styles/feed-animation.css";
-
-interface PolymarketTrade {
-  id: string;
-  ts: string;
-  amountUSD: number;
-  outcome: string;
-  price: number;
-  market: string;
-  url?: string;
-}
 
 interface PolymarketFeedResponse {
   trades?: PolymarketTrade[];
   ok?: boolean;
-  lastSync?: string | null;
+  lastSync?: string;
 }
 
 const fetcher = async (url: string): Promise<PolymarketTrade[]> => {
@@ -41,70 +31,98 @@ const fetcher = async (url: string): Promise<PolymarketTrade[]> => {
 
 function useFadeTracker(trades: PolymarketTrade[]) {
   const seenIds = useRef(new Set<string>());
-  const animatingIds = useRef(new Set<string>());
   const timeouts = useRef<Record<string, number>>({});
+  const [activeIds, setActiveIds] = useState<Record<string, boolean>>({});
 
   useEffect(() => {
+    const seen = seenIds.current;
+    const timers = timeouts.current;
+
     return () => {
-      Object.values(timeouts.current).forEach((timeoutId) => {
+      Object.values(timers).forEach((timeoutId) => {
         window.clearTimeout(timeoutId);
       });
-      timeouts.current = {};
+      Object.keys(timers).forEach((key) => {
+        delete timers[key];
+      });
+      seen.clear();
+      setActiveIds({});
     };
   }, []);
 
   useEffect(() => {
     if (trades.length === 0) {
+      const timers = timeouts.current;
       seenIds.current.clear();
-      animatingIds.current.clear();
-      Object.values(timeouts.current).forEach((timeoutId) => {
+      Object.values(timers).forEach((timeoutId) => {
         window.clearTimeout(timeoutId);
       });
-      timeouts.current = {};
+      Object.keys(timers).forEach((key) => {
+        delete timers[key];
+      });
+      setActiveIds({});
       return;
     }
+
+    const timers = timeouts.current;
+    const newIds: string[] = [];
 
     for (const trade of trades) {
       if (!seenIds.current.has(trade.id)) {
         seenIds.current.add(trade.id);
-        animatingIds.current.add(trade.id);
-        if (timeouts.current[trade.id]) {
-          window.clearTimeout(timeouts.current[trade.id]!);
-        }
-        timeouts.current[trade.id] = window.setTimeout(() => {
-          animatingIds.current.delete(trade.id);
-          delete timeouts.current[trade.id];
-        }, 700);
+        newIds.push(trade.id);
       }
     }
+
+    if (newIds.length === 0) {
+      return;
+    }
+
+    setActiveIds((prev) => {
+      const next = { ...prev };
+      for (const id of newIds) {
+        next[id] = true;
+      }
+      return next;
+    });
+
+    for (const id of newIds) {
+      const existingTimeout = timers[id];
+      if (existingTimeout) {
+        window.clearTimeout(existingTimeout);
+      }
+      timers[id] = window.setTimeout(() => {
+        setActiveIds((prev) => {
+          if (!prev[id]) {
+            return prev;
+          }
+          const next = { ...prev };
+          delete next[id];
+          return next;
+        });
+        delete timers[id];
+      }, 600);
+    }
+
+    return () => {
+      for (const id of newIds) {
+        const timeoutId = timers[id];
+        if (timeoutId) {
+          window.clearTimeout(timeoutId);
+          delete timers[id];
+        }
+      }
+    };
   }, [trades]);
 
-  return (id: string) => animatingIds.current.has(id);
-}
-
-function usePolymarketFeed() {
-  const { data, error } = useSWR<PolymarketTrade[]>(
-    "/api/polymarket/feed",
-    fetcher,
-    {
-      refreshInterval: 10_000,
-      revalidateOnFocus: false,
-      dedupingInterval: 5_000,
-    }
-  );
-
-  return {
-    data,
-    error,
-    trades: data ?? [],
-  };
+  return (id: string) => Boolean(activeIds[id]);
 }
 
 function formatCurrency(value: number) {
   return value.toLocaleString("en-US", {
     style: "currency",
     currency: "USD",
-    minimumFractionDigits: 0,
+    minimumFractionDigits: value >= 10_000 ? 0 : 2,
     maximumFractionDigits: value >= 10_000 ? 0 : 2,
   });
 }
@@ -122,20 +140,17 @@ function formatTimestamp(ts: string) {
     return ts;
   }
 
-  const now = Date.now();
-  const diff = Math.max(0, now - date.getTime());
-  const diffMinutes = Math.floor(diff / 60_000);
-
-  if (diffMinutes < 1) {
+  const diffMs = Date.now() - date.getTime();
+  if (diffMs < 60_000) {
     return "just now";
   }
 
+  const diffMinutes = Math.floor(diffMs / 60_000);
   if (diffMinutes < 60) {
     return `${diffMinutes}m ago`;
   }
 
   const diffHours = Math.floor(diffMinutes / 60);
-
   if (diffHours < 24) {
     return `${diffHours}h ago`;
   }
@@ -145,100 +160,100 @@ function formatTimestamp(ts: string) {
 }
 
 export function PolymarketFeed({ className }: { className?: string }) {
-  const { data, error, trades } = usePolymarketFeed();
+  const { data, error } = useSWR<PolymarketTrade[]>(
+    "/api/polymarket/feed",
+    fetcher,
+    {
+      refreshInterval: 10_000,
+      revalidateOnFocus: false,
+      dedupingInterval: 5_000,
+    }
+  );
+
+  const trades = data ?? [];
   const isAnimating = useFadeTracker(trades);
 
-  let content: ReactNode;
-
-  if (!data) {
-    content = (
-      <div className="flex items-center justify-center py-12 text-sm text-sky-200/80">
+  if (!data && !error) {
+    return (
+      <div
+        className={cn(
+          "flex min-h-[160px] items-center justify-center rounded-2xl border border-white/10 bg-white/5 text-sm text-sky-200/80",
+          className
+        )}
+      >
         <div className="flex items-center gap-3">
           <span className="h-3 w-3 animate-spin rounded-full border-2 border-sky-200/60 border-t-transparent" />
           <span>Loading Polymarket feed…</span>
         </div>
       </div>
     );
-  } else if (error) {
-    content = (
-      <div className="py-12 text-center text-sm text-sky-200/70">
-        Unable to load Polymarket feed right now.
+  }
+
+  if (error) {
+    return (
+      <div
+        className={cn(
+          "flex min-h-[160px] items-center justify-center rounded-2xl border border-red-400/30 bg-red-500/10 text-sm text-red-200",
+          className
+        )}
+      >
+        Unable to load Polymarket trades right now.
       </div>
     );
-  } else if (trades.length === 0) {
-    content = (
-      <div className="py-12 text-center text-sm text-sky-200/70">
+  }
+
+  if (trades.length === 0) {
+    return (
+      <div
+        className={cn(
+          "flex min-h-[160px] items-center justify-center rounded-2xl border border-white/10 bg-white/5 px-6 text-center text-sm text-sky-200/80",
+          className
+        )}
+      >
         No large trades detected in the last 6 hours.
       </div>
-    );
-  } else {
-    content = (
-      <ul className="space-y-4">
-        {trades.map((trade) => {
-          const amount = formatCurrency(trade.amountUSD);
-          const price = formatPrice(trade.price);
-          const timestamp = formatTimestamp(trade.ts);
-
-          return (
-            <li
-              key={trade.id}
-              className={cn(
-                "rounded-2xl border border-white/10 bg-white/5 p-4 shadow-[0_8px_30px_rgba(10,30,70,0.28)] transition-transform duration-300 hover:-translate-y-1 hover:border-sky-200/40 hover:bg-white/10",
-                isAnimating(trade.id) ? "fade-in" : "opacity-90"
-              )}
-            >
-              <div className="flex items-start justify-between gap-3">
-                <div className="flex-1 space-y-2">
-                  <div className="line-clamp-2 text-sm font-semibold text-white/95">
-                    {trade.market}
-                  </div>
-                  <div className="text-xs uppercase tracking-[0.3em] text-sky-200/70">
-                    {trade.outcome || "Unknown"} @ {price}
-                  </div>
-                </div>
-                <div className="shrink-0 text-right text-base font-semibold text-sky-100">
-                  {amount}
-                </div>
-              </div>
-              <div className="mt-4 flex items-center justify-between text-xs text-sky-200/70">
-                <div>{timestamp}</div>
-                {trade.url ? (
-                  <a
-                    href={trade.url}
-                    target="_blank"
-                    rel="noreferrer"
-                    className="font-semibold text-sky-200 hover:text-sky-100"
-                  >
-                    Open
-                  </a>
-                ) : (
-                  <span className="font-medium text-sky-200/50">No link</span>
-                )}
-              </div>
-            </li>
-          );
-        })}
-      </ul>
     );
   }
 
   return (
-    <section
-      className={cn(
-        "rounded-3xl border border-white/10 bg-gradient-to-br from-[#0b1b3a]/70 via-[#0f2f5d]/65 to-[#1b3f7c]/55 p-6 text-white shadow-[0_0_30px_rgba(20,60,120,0.25)] backdrop-blur-xl",
-        className
-      )}
-    >
-      <header className="mb-6 space-y-1">
-        <p className="text-xs font-semibold uppercase tracking-[0.3em] text-sky-200/70">
-          Polymarket activity
-        </p>
-        <h3 className="text-lg font-semibold text-white">Moonshot Order Stream</h3>
-        <p className="text-sm text-sky-200/80">
-          High-value matched orders streaming directly from the Polymarket live feed.
-        </p>
-      </header>
-      {content}
-    </section>
+    <ul className={cn("flex flex-col gap-4", className)}>
+      {trades.map((trade) => (
+        <li
+          key={trade.id}
+          className={cn(
+            "rounded-2xl border border-white/10 bg-white/[0.07] p-4 text-sm text-sky-100 shadow-[0_0_24px_rgba(48,128,255,0.12)] backdrop-blur-xl transition hover:border-white/20 hover:bg-white/10",
+            isAnimating(trade.id) ? "fade-in" : undefined
+          )}
+        >
+          <div className="flex flex-wrap items-start justify-between gap-3">
+            <span className="text-base font-semibold text-white">{trade.market}</span>
+            <span className="whitespace-nowrap text-sm font-semibold text-emerald-300">
+              {formatCurrency(trade.amountUSD)}
+            </span>
+          </div>
+          <div className="mt-3 flex flex-wrap items-center gap-2 text-xs text-sky-200/80">
+            <span className="rounded-full bg-white/10 px-2 py-1 font-medium uppercase tracking-wide text-white/80">
+              {trade.side || "—"}
+            </span>
+            <span>{trade.outcome ? `${trade.outcome} @ ${formatPrice(trade.price)}` : formatPrice(trade.price)}</span>
+            <div className="ml-auto flex items-center gap-2">
+              {trade.url ? (
+                <a
+                  href={trade.url}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="rounded-full bg-sky-500/20 px-3 py-1 text-xs font-semibold text-sky-100 transition hover:bg-sky-500/30"
+                >
+                  Open
+                </a>
+              ) : null}
+              <span className="text-[11px] uppercase tracking-wider text-sky-300/70">
+                {formatTimestamp(trade.ts)}
+              </span>
+            </div>
+          </div>
+        </li>
+      ))}
+    </ul>
   );
 }
