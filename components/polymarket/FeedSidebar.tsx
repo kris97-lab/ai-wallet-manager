@@ -9,13 +9,8 @@ import { cn } from '@/lib/utils';
 
 import { TradeOrb, type PolymarketTrade } from './TradeOrb';
 
-interface ApiTrade extends PolymarketTrade {
-  maker: string;
-  taker: string;
-}
-
 interface PolymarketFeedResponse {
-  trades?: ApiTrade[];
+  trades?: PolymarketTrade[];
   error?: string;
 }
 
@@ -33,27 +28,13 @@ const fetchPolymarketTrades = async (url: string): Promise<PolymarketTrade[]> =>
     throw new Error('Failed to fetch Polymarket feed.');
   }
 
-  const payload: unknown = await response.json();
+  const payload: PolymarketFeedResponse = await response.json();
 
-  if (!payload || typeof payload !== 'object') {
+  if (!Array.isArray(payload?.trades)) {
     return [];
   }
 
-  const { trades } = payload as PolymarketFeedResponse;
-
-  if (!Array.isArray(trades)) {
-    return [];
-  }
-
-  return trades.map(trade => ({
-    id: trade.id,
-    market: trade.market,
-    outcome: trade.outcome,
-    side: trade.side,
-    size: trade.size,
-    price: trade.price,
-    timestamp: trade.timestamp,
-  }));
+  return payload.trades;
 };
 
 function usePolymarketFeed() {
