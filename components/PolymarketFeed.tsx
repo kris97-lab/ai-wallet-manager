@@ -279,7 +279,7 @@ export function PolymarketFeed({
             <button
               type="button"
               onClick={() => {
-                const message = `Place Polymarket order: ${trade.side || ""} ${trade.outcome || ""} on '${trade.market}' for $${trade.amountUSD}. Market order.`.replace(/\s+/g, " ").trim();
+                const message = `Place Polymarket order: ${trade.side || ""} ${trade.outcome || ""} on '${trade.market}'.`.replace(/\s+/g, " ").trim();
                 if (onTrade) {
                   onTrade(message);
                   return;
