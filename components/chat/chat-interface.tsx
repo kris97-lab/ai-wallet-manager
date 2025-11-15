@@ -39,26 +39,15 @@ export function ChatInterface({ className }: ChatInterfaceProps) {
   const [, setCurrentRequestId] = useState<string | null>(null);
   const [thinkingMessage, setThinkingMessage] = useState<string | null>(null);
   const [isThinking, setIsThinking] = useState(false);
+  const [polySessionActive, setPolySessionActive] = useState(false);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
 
   const activeAccount = useActiveAccount();
   const activeChain = useActiveWalletChain();
 
-  useEffect(() => {
-    if (!activeAccount) {
-      return;
-    }
-
-    if (typeof window === 'undefined') {
-      return;
-    }
-
-    if (window.__polyLoginStarted) {
-      return;
-    }
-
-    window.__polyLoginStarted = true;
+  function handlePolymarketPopup() {
+    if (typeof window === 'undefined') return;
 
     const popup = window.open(
       '/api/polymarket/login',
@@ -72,11 +61,31 @@ export function ChatInterface({ className }: ChatInterfaceProps) {
         window.location.reload();
       }
     }, 300);
+  }
 
-    return () => {
-      clearInterval(timer);
-    };
-  }, [activeAccount]);
+  useEffect(() => {
+    fetch('/api/polymarket/session-check')
+      .then(response => response.json())
+      .then(data => setPolySessionActive(Boolean(data?.active)))
+      .catch(() => setPolySessionActive(false));
+  }, []);
+
+  useEffect(() => {
+    if (!activeAccount || polySessionActive) {
+      return;
+    }
+
+    if (typeof window === 'undefined') {
+      return;
+    }
+
+    if (window.__polyLoginStarted) {
+      return;
+    }
+
+    window.__polyLoginStarted = true;
+    handlePolymarketPopup();
+  }, [activeAccount, polySessionActive]);
   const activeChat = useChatHistoryStore(selectActiveChat);
   const activeChatId = useChatHistoryStore(state => state.activeChatId);
   const createSession = useChatHistoryStore(state => state.createSession);
@@ -560,11 +569,20 @@ export function ChatInterface({ className }: ChatInterfaceProps) {
                   onChange={event => setInput(event.target.value)}
                   onKeyDown={handleKeyDown}
                   placeholder="Craft your Web3 request or trading strategy..."
-                  className="w-full resize-none rounded-xl border border-white/15 bg-white/[0.06] px-5 py-3 pr-14 text-sm text-white placeholder:text-[#7fa3d4] focus:border-[#6aa8ff] focus:outline-none focus:ring-2 focus:ring-[#6aa8ff]/40"
+                  className="w-full resize-none rounded-xl border border-white/15 bg-white/[0.06] px-5 py-3 pr-36 text-sm text-white placeholder:text-[#7fa3d4] focus:border-[#6aa8ff] focus:outline-none focus:ring-2 focus:ring-[#6aa8ff]/40"
                   rows={1}
                   style={{ minHeight: '52px', maxHeight: '160px' }}
                   disabled={isLoading}
                 />
+                {activeAccount && !polySessionActive && (
+                  <button
+                    type="button"
+                    onClick={handlePolymarketPopup}
+                    className="absolute right-14 top-1/2 -translate-y-1/2 rounded-full bg-[#1b3f7c]/70 px-3 py-1.5 text-[10px] font-semibold text-[#9abffd] border border-white/20 shadow-[0_0_18px_rgba(106,168,255,0.35)] hover:bg-[#254d93] hover:text-white transition-colors"
+                  >
+                    Enable Poly
+                  </button>
+                )}
                 <button
                   type="submit"
                   disabled={!input.trim() || isLoading}
