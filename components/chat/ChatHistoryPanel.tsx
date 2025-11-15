@@ -1,12 +1,16 @@
 "use client";
 
-import { useMemo } from "react";
+import "@/styles/chatHistory.css";
+
+import { useCallback, useEffect, useMemo, useState } from "react";
 
 import { cn } from "@/lib/utils";
 import { useChatHistoryStore, type ChatSession } from "@/store/chatHistory";
 
 interface ChatHistoryPanelProps {
   className?: string;
+  isWalletConnected?: boolean;
+  walletAddress?: string | null;
 }
 
 const formatTimestamp = (iso: string) => {
@@ -35,26 +39,57 @@ const sortChats = (chats: ChatSession[]) =>
     (a, b) => new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime()
   );
 
-export function ChatHistoryPanel({ className }: ChatHistoryPanelProps) {
+export function ChatHistoryPanel({
+  className,
+  isWalletConnected = false,
+  walletAddress = null,
+}: ChatHistoryPanelProps) {
   const chats = useChatHistoryStore(state => state.chats);
   const activeChatId = useChatHistoryStore(state => state.activeChatId);
   const setActiveSession = useChatHistoryStore(state => state.setActiveSession);
+  const createSession = useChatHistoryStore(state => state.createSession);
 
   const sortedChats = useMemo(() => sortChats(chats), [chats]);
+
+  const [hasAnimated, setHasAnimated] = useState(isWalletConnected);
+
+  useEffect(() => {
+    if (isWalletConnected) {
+      setHasAnimated(true);
+    }
+  }, [isWalletConnected]);
+
+  const handleCreateSession = useCallback(() => {
+    const id = createSession(walletAddress ?? undefined);
+    setActiveSession(id);
+  }, [createSession, setActiveSession, walletAddress]);
 
   return (
     <aside
       className={cn(
-        "hidden md:flex md:w-[280px] md:flex-col md:self-stretch lg:sticky lg:top-10",
+        "chat-history-panel-shell hidden md:flex md:w-[280px] md:flex-col md:self-stretch lg:sticky lg:top-10",
+        hasAnimated && "wallet-connected",
         className
       )}
+      data-wallet-connected={isWalletConnected}
     >
       <div className="flex flex-1 flex-col overflow-hidden rounded-3xl border border-white/10 bg-gradient-to-b from-[#0b1b3a]/90 to-[#0f2f5d]/90 shadow-[0_0_32px_rgba(48,128,255,0.14)] backdrop-blur-2xl">
         <div className="border-b border-white/10 px-6 py-5">
-          <h2 className="text-base font-semibold text-white">Chat History</h2>
-          <p className="mt-1 text-xs text-[#b7d8ff]/80">
+          <div className="flex items-center justify-between gap-3">
+            <div>
+              <h2 className="text-base font-semibold text-white">Chat History</h2>
+              <p className="mt-1 text-xs text-[#b7d8ff]/80">
             Resume previous BeaverXBT sessions and pick up right where you left off.
-          </p>
+              </p>
+            </div>
+            <button
+              type="button"
+              onClick={handleCreateSession}
+              className="chat-history-new-session-btn"
+            >
+              + New Chat
+            </button>
+          </div>
         </div>
         <div className="flex-1 overflow-y-auto px-2 py-4">
           {sortedChats.length === 0 ? (
@@ -71,14 +106,18 @@ export function ChatHistoryPanel({ className }: ChatHistoryPanelProps) {
                       type="button"
                       onClick={() => setActiveSession(chat.id)}
                       className={cn(
-                        "group flex w-full flex-col rounded-2xl border border-transparent bg-white/[0.03] px-4 py-3 text-left transition-all",
+                        "chat-session-button group flex w-full flex-col rounded-2xl border border-transparent bg-white/[0.03] px-4 py-3 text-left transition-all",
                         isActive
-                          ? "border-[#6aa8ff]/40 bg-white/[0.09] shadow-[0_0_28px_rgba(106,168,255,0.28)]"
+                          ? "is-active border-[#6aa8ff]/40 bg-white/[0.09] shadow-[0_0_28px_rgba(106,168,255,0.28)]"
                           : "hover:border-white/15 hover:bg-white/[0.08]"
                       )}
+                      data-active={isActive}
                     >
-                      <div className="flex items-center justify-between text-xs text-[#86bbff]/80">
-                        <span className="font-semibold uppercase tracking-[0.25em] text-[#d5e8ff]">
+                      <div className="flex items-center justify-between gap-3 text-xs text-[#86bbff]/80">
+                        <span
+                          className="chat-session-title font-semibold uppercase tracking-[0.25em] text-[#d5e8ff]"
+                          title={chat.title}
+                        >
                           {chat.title}
                         </span>
                         <span>{formatTimestamp(chat.updatedAt)}</span>
@@ -86,7 +125,7 @@ export function ChatHistoryPanel({ className }: ChatHistoryPanelProps) {
                       <div className="mt-2 text-[13px] font-medium text-white/90">
                         {trimText(chat.walletAddress, 22)}
                       </div>
-                      <p className="mt-1 text-xs text-[#b7d8ff]/80">
+                      <p className="chat-session-preview mt-1 text-xs">
                         {trimText(chat.lastMessage || "No messages yet", 80)}
                       </p>
                     </button>
