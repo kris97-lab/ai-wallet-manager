@@ -220,3 +220,20 @@
 .orb-fade-in {
   animation: orbFadeIn 0.65s ease-out;
 }
+
+@keyframes feedFadeIn {
+  0% {
+    opacity: 0;
+    transform: translateY(12px);
+    filter: blur(8px);
+  }
+  100% {
+    opacity: 1;
+    transform: translateY(0);
+    filter: blur(0px);
+  }
+}
+
+.feed-fade-in {
+  animation: feedFadeIn 0.55s ease-out;
+}

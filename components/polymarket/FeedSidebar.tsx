@@ -8,6 +8,7 @@ import useSWR from 'swr';
 import { cn } from '@/lib/utils';
 
 import { TradeOrb, type PolymarketTrade } from './TradeOrb';
+import { PolymarketFeed } from '../PolymarketFeed';
 
 interface PolymarketFeedResponse {
   trades?: PolymarketTrade[];
@@ -201,6 +202,9 @@ function SidebarPanel() {
             </div>
           )}
         </div>
+      </div>
+      <div className="mt-6">
+        <PolymarketFeed />
       </div>
     </div>
   );
