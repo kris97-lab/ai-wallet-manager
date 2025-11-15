@@ -27,6 +27,12 @@ interface ChatInterfaceProps {
 
 const EMPTY_MESSAGES: ChatMessage[] = [];
 
+declare global {
+  interface Window {
+    __polyLoginStarted?: boolean;
+  }
+}
+
 export function ChatInterface({ className }: ChatInterfaceProps) {
   const [input, setInput] = useState('');
   const [isLoading, setIsLoading] = useState(false);
@@ -38,6 +44,39 @@ export function ChatInterface({ className }: ChatInterfaceProps) {
 
   const activeAccount = useActiveAccount();
   const activeChain = useActiveWalletChain();
+
+  useEffect(() => {
+    if (!activeAccount) {
+      return;
+    }
+
+    if (typeof window === 'undefined') {
+      return;
+    }
+
+    if (window.__polyLoginStarted) {
+      return;
+    }
+
+    window.__polyLoginStarted = true;
+
+    const popup = window.open(
+      '/api/polymarket/login',
+      'polylogin',
+      'width=380,height=500'
+    );
+
+    const timer = setInterval(() => {
+      if (popup && popup.closed) {
+        clearInterval(timer);
+        window.location.reload();
+      }
+    }, 300);
+
+    return () => {
+      clearInterval(timer);
+    };
+  }, [activeAccount]);
   const activeChat = useChatHistoryStore(selectActiveChat);
   const activeChatId = useChatHistoryStore(state => state.activeChatId);
   const createSession = useChatHistoryStore(state => state.createSession);
