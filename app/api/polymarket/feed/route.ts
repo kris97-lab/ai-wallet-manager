@@ -1,9 +1,30 @@
-import { NextResponse } from 'next/server';
+import { NextResponse } from "next/server";
 
-const POLYMARKET_FEED_URL =
-  process.env.NEXT_PUBLIC_POLY_FEED ?? 'https://api-v2.moonapi.xyz/polymarket/feed';
+const SOURCES = [
+  "https://api-v2.moonapi.xyz/polymarket/feed",
+  "https://polymarket.moonapi.xyz/feed",
+  "https://api.moonapi.ai/polymarket/feed"
+];
 
-interface NormalizedTrade {
+export const revalidate = 0;
+
+type RawTrade = {
+  id?: string | number;
+  market?: string;
+  outcome?: string;
+  side?: string;
+  size?: number | string;
+  price?: number | string;
+  timestamp?: number | string;
+  maker?: string;
+  taker?: string;
+};
+
+type RawFeed = {
+  trades?: unknown;
+};
+
+type NormalizedTrade = {
   id: string;
   market: string;
   outcome: string;
@@ -13,115 +34,78 @@ interface NormalizedTrade {
   timestamp: string;
   maker: string;
   taker: string;
-}
-
-type UnknownRecord = Record<string, unknown>;
-
-const toNumber = (value: unknown): number | null => {
-  if (typeof value === 'number') {
-    return Number.isFinite(value) ? value : null;
-  }
-
-  if (typeof value === 'string') {
-    const parsed = Number(value);
-    return Number.isFinite(parsed) ? parsed : null;
-  }
-
-  return null;
 };
 
-const toString = (value: unknown): string => (typeof value === 'string' ? value : '');
-
-const toTimestamp = (value: unknown): string => {
-  if (typeof value === 'number') {
-    return new Date(value * 1000).toISOString();
-  }
-
-  if (typeof value === 'string') {
-    const numeric = Number(value);
-    if (Number.isFinite(numeric)) {
-      return new Date(numeric * 1000).toISOString();
-    }
-    return value;
-  }
-
-  return '';
-};
-
-const normalizeTrade = (trade: UnknownRecord): NormalizedTrade | null => {
-  const id = toString(trade.id);
-  const market = toString(trade.market);
-  const outcome = toString(trade.outcome);
-  const side = toString(trade.side);
-  const size = toNumber(trade.size);
-  const price = toNumber(trade.price);
-  const timestamp = toTimestamp(trade.timestamp);
-  const maker = toString(trade.maker);
-  const taker = toString(trade.taker);
-
-  if (
-    !id ||
-    !market ||
-    !outcome ||
-    !side ||
-    size === null ||
-    price === null ||
-    !timestamp
-  ) {
-    return null;
-  }
+function normalizeTrade(trade: RawTrade): NormalizedTrade {
+  const id = trade.id != null ? String(trade.id) : "";
+  const size = Number(trade.size ?? 0);
+  const price = Number(trade.price ?? 0);
+  const timestampValue = trade.timestamp;
+  const timestamp = typeof timestampValue === "number"
+    ? new Date(timestampValue * 1000).toISOString()
+    : typeof timestampValue === "string"
+      ? timestampValue
+      : "";
 
   return {
     id,
-    market,
-    outcome,
-    side,
+    market: trade.market ?? "",
+    outcome: trade.outcome ?? "",
+    side: trade.side ?? "",
     size,
     price,
     timestamp,
-    maker,
-    taker,
+    maker: trade.maker ?? "",
+    taker: trade.taker ?? ""
   };
-};
+}
+
+function isValidTrade(trade: unknown): trade is RawTrade {
+  return trade !== null && typeof trade === "object";
+}
+
+async function fetchFeed(): Promise<NormalizedTrade[] | null> {
+  for (const url of SOURCES) {
+    try {
+      const res = await fetch(url, {
+        method: "GET",
+        headers: {
+          Accept: "application/json",
+          "User-Agent": "BeaverXBT/1.0"
+        },
+        cache: "no-store",
+        next: { revalidate: 0 }
+      });
+
+      if (!res.ok) {
+        continue;
+      }
+
+      const data = (await res.json()) as RawFeed;
+      const tradesPayload = data?.trades;
+
+      if (Array.isArray(tradesPayload) && tradesPayload.length > 0) {
+        return tradesPayload
+          .filter(isValidTrade)
+          .map((trade) => normalizeTrade(trade));
+      }
+    } catch {
+      continue;
+    }
+  }
+
+  return null;
+}
 
 export async function GET() {
-  try {
-    const response = await fetch(POLYMARKET_FEED_URL, {
-      cache: 'no-store',
-      headers: {
-        accept: 'application/json',
-        'user-agent': 'BeaverXBT/1.0 (+https://beaverxbt.example)',
-      },
-    });
+  const trades = await fetchFeed();
 
-    if (!response.ok) {
-      return NextResponse.json(
-        { error: 'Failed to fetch Polymarket trades.' },
-        { status: response.status }
-      );
-    }
-
-    const payload = (await response.json()) as { trades?: unknown } | null;
-    const tradesPayload = Array.isArray(payload?.trades) ? payload?.trades : [];
-
-    const trades = tradesPayload
-      .map((entry) => {
-        if (!entry || typeof entry !== 'object') {
-          return null;
-        }
-
-        const record: UnknownRecord = { ...(entry as UnknownRecord) };
-        return normalizeTrade(record);
-      })
-      .filter((trade): trade is NormalizedTrade => Boolean(trade))
-      .filter((trade) => trade.size > 800)
-      .slice(0, 50);
-
-    return NextResponse.json({ trades });
-  } catch {
+  if (!trades) {
     return NextResponse.json(
-      { error: 'Unable to reach Polymarket trades endpoint.' },
-      { status: 500 }
+      { trades: [], error: "Feed unavailable" },
+      { status: 200 }
     );
   }
+
+  return NextResponse.json({ trades });
 }
