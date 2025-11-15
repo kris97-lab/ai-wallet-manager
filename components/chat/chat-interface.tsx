@@ -41,17 +41,36 @@ export function ChatInterface({ className }: ChatInterfaceProps) {
   const activeChat = useChatHistoryStore(selectActiveChat);
   const activeChatId = useChatHistoryStore(state => state.activeChatId);
   const createSession = useChatHistoryStore(state => state.createSession);
+  const setActiveSession = useChatHistoryStore(state => state.setActiveSession);
   const addMessageToStore = useChatHistoryStore(state => state.addMessage);
   const updateMessageInStore = useChatHistoryStore(state => state.updateMessage);
   const setSessionIdForChat = useChatHistoryStore(state => state.setSessionId);
+  const findSessionByWallet = useChatHistoryStore(state => state.findSessionByWallet);
   const messages = activeChat?.messages ?? EMPTY_MESSAGES;
   const sessionId = activeChat?.sessionId ?? null;
 
   useEffect(() => {
-    if (!activeChatId) {
-      createSession(activeAccount?.address ?? null);
+    if (activeAccount?.address) {
+      const existingSession = findSessionByWallet(activeAccount.address);
+      if (existingSession) {
+        if (existingSession.id !== activeChatId) {
+          setActiveSession(existingSession.id);
+        }
+        return;
+      }
+
+      const address = activeAccount.address;
+      const shortAddress =
+        address.length > 10 ? `${address.slice(0, 6)}…${address.slice(-4)}` : address;
+      const newSessionId = createSession(address, `Session for ${shortAddress}`);
+      setActiveSession(newSessionId);
+      return;
     }
-  }, [activeChatId, createSession, activeAccount?.address]);
+
+    if (!activeChatId) {
+      createSession(null);
+    }
+  }, [activeAccount?.address, activeChatId, createSession, findSessionByWallet, setActiveSession]);
 
   const generateMessageId = () =>
     typeof crypto !== 'undefined' && 'randomUUID' in crypto
