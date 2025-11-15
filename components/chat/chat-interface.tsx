@@ -1,6 +1,15 @@
 'use client';
 
-import { useState, useRef, useEffect, type FormEvent, type KeyboardEvent } from 'react';
+import {
+  useState,
+  useRef,
+  useEffect,
+  useImperativeHandle,
+  forwardRef,
+  useCallback,
+  type FormEvent,
+  type KeyboardEvent,
+} from 'react';
 import { Send, Bot, User, AlertCircle, Image as ImageIcon } from 'lucide-react';
 import Image from 'next/image';
 import { stream } from 'fetch-event-stream';
@@ -25,6 +34,10 @@ interface ChatInterfaceProps {
   className?: string;
 }
 
+export interface ChatInterfaceHandle {
+  handleExternalMessage: (message: string) => void;
+}
+
 const EMPTY_MESSAGES: ChatMessage[] = [];
 
 declare global {
@@ -33,7 +46,8 @@ declare global {
   }
 }
 
-export function ChatInterface({ className }: ChatInterfaceProps) {
+export const ChatInterface = forwardRef<ChatInterfaceHandle, ChatInterfaceProps>(
+  function ChatInterface({ className }, ref) {
   const [input, setInput] = useState('');
   const [isLoading, setIsLoading] = useState(false);
   const [, setCurrentRequestId] = useState<string | null>(null);
@@ -120,10 +134,13 @@ export function ChatInterface({ className }: ChatInterfaceProps) {
     }
   }, [activeAccount?.address, activeChatId, createSession, findSessionByWallet, setActiveSession]);
 
-  const generateMessageId = () =>
-    typeof crypto !== 'undefined' && 'randomUUID' in crypto
-      ? crypto.randomUUID()
-      : `${Date.now()}-${Math.random().toString(16).slice(2)}`;
+  const generateMessageId = useCallback(
+    () =>
+      typeof crypto !== 'undefined' && 'randomUUID' in crypto
+        ? crypto.randomUUID()
+        : `${Date.now()}-${Math.random().toString(16).slice(2)}`,
+    []
+  );
 
   const prepareTransactionFromAction = (actionData: TransactionPayload) => {
     return prepareTransaction({
@@ -159,189 +176,228 @@ export function ChatInterface({ className }: ChatInterfaceProps) {
     }
   }, [messages, isThinking]);
 
-  const submitMessage = async () => {
-    if (!input.trim() || isLoading) {
-      return;
-    }
+  const submitMessage = useCallback(
+    async (contentOverride?: string) => {
+      const messageContent = (contentOverride ?? input).trim();
+      if (!messageContent || isLoading) {
+        return;
+      }
 
-    let chatId = activeChatId;
-    if (!chatId) {
-      chatId = createSession(activeAccount?.address ?? null);
-    }
+      let chatId = activeChatId;
+      if (!chatId) {
+        chatId = createSession(activeAccount?.address ?? null);
+      }
 
-    if (!chatId) {
-      return;
-    }
+      if (!chatId) {
+        return;
+      }
 
-    const now = new Date();
-    const userMessage: ChatMessage = {
-      id: generateMessageId(),
-      role: 'user',
-      content: input.trim(),
-      timestamp: now.toISOString(),
-      status: 'sent',
-    };
+      const now = new Date();
+      const userMessage: ChatMessage = {
+        id: generateMessageId(),
+        role: 'user',
+        content: messageContent,
+        timestamp: now.toISOString(),
+        status: 'sent',
+      };
 
-    addMessageToStore(chatId, userMessage);
-    setInput('');
-    setIsLoading(true);
+      addMessageToStore(chatId, userMessage);
+      setInput('');
+      setIsLoading(true);
 
-    const assistantMessageId = generateMessageId();
-    const assistantMessage: ChatMessage = {
-      id: assistantMessageId,
-      role: 'assistant',
-      content: '',
-      timestamp: new Date(now.getTime() + 1).toISOString(),
-      status: 'sending',
-      actions: [],
-      images: [],
-    };
+      const assistantMessageId = generateMessageId();
+      const assistantMessage: ChatMessage = {
+        id: assistantMessageId,
+        role: 'assistant',
+        content: '',
+        timestamp: new Date(now.getTime() + 1).toISOString(),
+        status: 'sending',
+        actions: [],
+        images: [],
+      };
 
-    addMessageToStore(chatId, assistantMessage);
+      addMessageToStore(chatId, assistantMessage);
 
-    try {
-      const events = await stream('/api/chat', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          messages: [
-            {
-              role: 'user',
-              content: userMessage.content,
-            },
-          ],
-          context: {
-            session_id: sessionId,
-            from: activeAccount?.address,
-            chain_ids: activeChain?.id ? [activeChain.id] : undefined,
+      try {
+        const events = await stream('/api/chat', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
           },
-        }),
-      });
+          body: JSON.stringify({
+            messages: [
+              {
+                role: 'user',
+                content: messageContent,
+              },
+            ],
+            context: {
+              session_id: sessionId,
+              from: activeAccount?.address,
+              chain_ids: activeChain?.id ? [activeChain.id] : undefined,
+            },
+          }),
+        });
 
-      for await (const event of events) {
-        if (!event.data) {
-          continue;
-        }
-
-        try {
-          const parsedEventData = JSON.parse(event.data) as Record<string, unknown>;
-
-          if (event.event === 'delta' || event.event === 'action' || event.event === 'image') {
-            setIsThinking(false);
-            setThinkingMessage(null);
+        for await (const event of events) {
+          if (!event.data) {
+            continue;
           }
 
-          switch (event.event) {
-            case 'init': {
-              if (typeof parsedEventData.session_id === 'string') {
-                setSessionIdForChat(chatId, parsedEventData.session_id);
-              }
-              if (typeof parsedEventData.request_id === 'string') {
-                setCurrentRequestId(parsedEventData.request_id);
-              }
-              break;
+          try {
+            const parsedEventData = JSON.parse(event.data) as Record<string, unknown>;
+
+            if (event.event === 'delta' || event.event === 'action' || event.event === 'image') {
+              setIsThinking(false);
+              setThinkingMessage(null);
             }
 
-            case 'presence': {
-              if (typeof parsedEventData.data === 'string') {
-                setThinkingMessage(parsedEventData.data);
-                setIsThinking(true);
+            switch (event.event) {
+              case 'init': {
+                if (typeof parsedEventData.session_id === 'string') {
+                  setSessionIdForChat(chatId, parsedEventData.session_id);
+                }
+                if (typeof parsedEventData.request_id === 'string') {
+                  setCurrentRequestId(parsedEventData.request_id);
+                }
+                break;
               }
-              break;
-            }
 
-            case 'delta': {
-              if (typeof parsedEventData.v === 'string') {
+              case 'presence': {
+                if (typeof parsedEventData.data === 'string') {
+                  setThinkingMessage(parsedEventData.data);
+                  setIsThinking(true);
+                }
+                break;
+              }
+
+              case 'delta': {
+                if (typeof parsedEventData.v === 'string') {
+                  updateMessageInStore(chatId, assistantMessageId, message => ({
+                    ...message,
+                    content: message.content + parsedEventData.v,
+                  }));
+                }
+                break;
+              }
+
+              case 'action': {
+                const actionData = {
+                  type: parsedEventData.type as ActionEvent['type'],
+                  data: parsedEventData.data as ActionEvent['data'],
+                  request_id: typeof parsedEventData.request_id === 'string' ? parsedEventData.request_id : '',
+                  session_id: typeof parsedEventData.session_id === 'string' ? parsedEventData.session_id : '',
+                } as ActionEvent;
+
                 updateMessageInStore(chatId, assistantMessageId, message => ({
                   ...message,
-                  content: message.content + parsedEventData.v,
+                  actions: [...(message.actions ?? []), actionData],
                 }));
+                break;
               }
-              break;
+
+              case 'image': {
+                const imageData: ImageEvent = {
+                  url: String(parsedEventData.url),
+                  width: typeof parsedEventData.width === 'number' ? parsedEventData.width : Number(parsedEventData.width ?? 512),
+                  height: typeof parsedEventData.height === 'number' ? parsedEventData.height : Number(parsedEventData.height ?? 512),
+                };
+
+                updateMessageInStore(chatId, assistantMessageId, message => ({
+                  ...message,
+                  images: [...(message.images ?? []), imageData],
+                }));
+                break;
+              }
+
+              case 'context': {
+                break;
+              }
+
+              case 'error': {
+                setIsThinking(false);
+                setThinkingMessage(null);
+
+                updateMessageInStore(chatId, assistantMessageId, message => ({
+                  ...message,
+                  content:
+                    message.content +
+                    '\n\n❌ Error: ' +
+                    (typeof parsedEventData.data === 'string' ? parsedEventData.data : 'An error occurred'),
+                  status: 'error',
+                }));
+                break;
+              }
+
+              case 'done': {
+                setIsThinking(false);
+                setThinkingMessage(null);
+
+                updateMessageInStore(chatId, assistantMessageId, message => ({
+                  ...message,
+                  status: 'sent',
+                }));
+                break;
+              }
             }
-
-            case 'action': {
-              const actionData = {
-                type: parsedEventData.type as ActionEvent['type'],
-                data: parsedEventData.data as ActionEvent['data'],
-                request_id: typeof parsedEventData.request_id === 'string' ? parsedEventData.request_id : '',
-                session_id: typeof parsedEventData.session_id === 'string' ? parsedEventData.session_id : '',
-              } as ActionEvent;
-
-              updateMessageInStore(chatId, assistantMessageId, message => ({
-                ...message,
-                actions: [...(message.actions ?? []), actionData],
-              }));
-              break;
-            }
-
-            case 'image': {
-              const imageData: ImageEvent = {
-                url: String(parsedEventData.url),
-                width: typeof parsedEventData.width === 'number' ? parsedEventData.width : Number(parsedEventData.width ?? 512),
-                height: typeof parsedEventData.height === 'number' ? parsedEventData.height : Number(parsedEventData.height ?? 512),
-              };
-
-              updateMessageInStore(chatId, assistantMessageId, message => ({
-                ...message,
-                images: [...(message.images ?? []), imageData],
-              }));
-              break;
-            }
-
-            case 'context': {
-              break;
-            }
-
-            case 'error': {
-              setIsThinking(false);
-              setThinkingMessage(null);
-
-              updateMessageInStore(chatId, assistantMessageId, message => ({
-                ...message,
-                content:
-                  message.content +
-                  '\\n\\n❌ Error: ' +
-                  (typeof parsedEventData.data === 'string' ? parsedEventData.data : 'An error occurred'),
-                status: 'error',
-              }));
-              break;
-            }
-
-            case 'done': {
-              setIsThinking(false);
-              setThinkingMessage(null);
-
-              updateMessageInStore(chatId, assistantMessageId, message => ({
-                ...message,
-                status: 'sent',
-              }));
-              break;
-            }
+          } catch (parseError) {
+            console.warn('Failed to parse event data:', event.data, parseError);
           }
-        } catch (parseError) {
-          console.warn('Failed to parse event data:', event.data, parseError);
         }
+      } catch (error) {
+        console.error('Error sending message:', error);
+        setIsThinking(false);
+        setThinkingMessage(null);
+
+        updateMessageInStore(chatId, assistantMessageId, message => ({
+          ...message,
+          content:
+            message.content ||
+            'Sorry, I encountered an error while processing your request. Please try again.',
+          status: 'error',
+        }));
+      } finally {
+        setIsLoading(false);
       }
-    } catch (error) {
-      console.error('Error sending message:', error);
-      setIsThinking(false);
-      setThinkingMessage(null);
+    },
+    [
+      input,
+      isLoading,
+      activeChatId,
+      createSession,
+      activeAccount?.address,
+      generateMessageId,
+      addMessageToStore,
+      setIsLoading,
+      sessionId,
+      activeChain?.id,
+      setSessionIdForChat,
+      setCurrentRequestId,
+      updateMessageInStore,
+      setIsThinking,
+      setThinkingMessage,
+    ]
+  );
 
-      updateMessageInStore(chatId, assistantMessageId, message => ({
-        ...message,
-        content:
-          message.content ||
-          'Sorry, I encountered an error while processing your request. Please try again.',
-        status: 'error',
-      }));
-    } finally {
-      setIsLoading(false);
-    }
-  };
+  const handleExternalMessage = useCallback(
+    (message: string) => {
+      const trimmed = message.trim();
+      if (!trimmed) {
+        return;
+      }
+      setInput(trimmed);
+      void submitMessage(trimmed);
+    },
+    [submitMessage]
+  );
 
+  useImperativeHandle(
+    ref,
+    () => ({
+      handleExternalMessage,
+    }),
+    [handleExternalMessage]
+  );
   const handleSubmit = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     await submitMessage();
@@ -575,7 +631,7 @@ export function ChatInterface({ className }: ChatInterfaceProps) {
                   onChange={event => setInput(event.target.value)}
                   onKeyDown={handleKeyDown}
                   placeholder="Craft your Web3 request or trading strategy..."
-                  className="w-full resize-none rounded-xl border border-white/15 bg-white/[0.06] px-5 py-3 pr-48 text-sm text-white placeholder:text-[#7fa3d4] focus:border-[#6aa8ff] focus:outline-none focus:ring-2 focus:ring-[#6aa8ff]/40"
+                  className="w-full resize-none rounded-xl border border-white/15 bg-white/[0.06] px-5 py-3 pr-28 text-sm text-white placeholder:text-[#7fa3d4] focus:border-[#6aa8ff] focus:outline-none focus:ring-2 focus:ring-[#6aa8ff]/40"
                   rows={1}
                   style={{ minHeight: '52px', maxHeight: '160px' }}
                   disabled={isLoading}
@@ -583,7 +639,7 @@ export function ChatInterface({ className }: ChatInterfaceProps) {
                 <button
                   type="button"
                   onClick={handleTradeTemplate}
-                  className="absolute right-12 top-1/2 -translate-y-1/2 rounded-full bg-gradient-to-r from-[#1b3f7c] to-[#6aa8ff] px-4 py-1 text-[10px] font-semibold text-white shadow-[0_0_18px_rgba(106,168,255,0.35)] transition-colors hover:from-[#254d93] hover:to-[#6aa8ff]"
+                  className="absolute right-24 top-1/2 -translate-y-1/2 rounded-full bg-gradient-to-r from-[#1b3f7c] to-[#6aa8ff] px-3 py-1.5 text-[10px] font-semibold text-white shadow-[0_0_18px_rgba(106,168,255,0.4)] transition-colors hover:brightness-110"
                 >
                   Trade
                 </button>
@@ -591,7 +647,7 @@ export function ChatInterface({ className }: ChatInterfaceProps) {
                   <button
                     type="button"
                     onClick={handlePolymarketPopup}
-                    className="absolute right-24 top-1/2 -translate-y-1/2 rounded-full bg-[#1b3f7c]/70 px-3 py-1.5 text-[10px] font-semibold text-[#9abffd] border border-white/20 shadow-[0_0_18px_rgba(106,168,255,0.35)] hover:bg-[#254d93] hover:text-white transition-colors"
+                    className="absolute right-12 top-1/2 -translate-y-1/2 rounded-full bg-[#1b3f7c]/70 px-3 py-1.5 text-[10px] font-semibold text-[#9abffd] border border-white/20 shadow-[0_0_18px_rgba(106,168,255,0.35)] hover:bg-[#254d93] hover:text-white transition-colors"
                   >
                     Enable Poly
                   </button>
@@ -613,4 +669,4 @@ export function ChatInterface({ className }: ChatInterfaceProps) {
       </div>
     </div>
   );
-}
+});

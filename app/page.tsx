@@ -1,8 +1,8 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 
-import { ChatInterface } from "@/components/chat/chat-interface";
+import { ChatInterface, type ChatInterfaceHandle } from "@/components/chat/chat-interface";
 import { ChatHistoryPanel } from "@/components/chat/ChatHistoryPanel";
 import { ChatHistoryToggle } from "@/components/chat/ChatHistoryToggle";
 import { FeedSidebar } from "@/components/polymarket/FeedSidebar";
@@ -13,6 +13,11 @@ export default function Home() {
   const isWalletConnected = Boolean(activeAccount);
   const [showChatHistory, setShowChatHistory] = useState(true);
   const [hasManualToggle, setHasManualToggle] = useState(false);
+  const chatInterfaceRef = useRef<ChatInterfaceHandle>(null);
+
+  const handleTradeViaAI = useCallback((message: string) => {
+    chatInterfaceRef.current?.handleExternalMessage(message);
+  }, []);
 
   useEffect(() => {
     if (!isWalletConnected) {
@@ -53,9 +58,13 @@ export default function Home() {
           className="h-full"
         />
         <div className="flex h-full min-h-0 flex-col overflow-hidden">
-          <ChatInterface className="h-full w-full" />
+          <ChatInterface ref={chatInterfaceRef} className="h-full w-full" />
         </div>
-        <FeedSidebar className="h-full" isWalletConnected={isWalletConnected} />
+        <FeedSidebar
+          className="h-full"
+          isWalletConnected={isWalletConnected}
+          onTrade={handleTradeViaAI}
+        />
       </div>
     </div>
   );

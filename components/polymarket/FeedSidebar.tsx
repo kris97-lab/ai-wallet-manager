@@ -6,9 +6,10 @@ import { PolymarketFeed } from "../PolymarketFeed";
 interface FeedSidebarProps {
   className?: string;
   isWalletConnected: boolean;
+  onTrade?: (message: string) => void;
 }
 
-export function FeedSidebar({ className, isWalletConnected }: FeedSidebarProps) {
+export function FeedSidebar({ className, isWalletConnected, onTrade }: FeedSidebarProps) {
   if (!isWalletConnected) {
     return null;
   }
@@ -30,7 +31,7 @@ export function FeedSidebar({ className, isWalletConnected }: FeedSidebarProps) 
           <p className="mb-4 text-xs text-sky-200/70">
             Monitoring large matched orders above 800&nbsp;USDC. Updates every 10 seconds.
           </p>
-          <PolymarketFeed isWalletConnected={isWalletConnected} />
+          <PolymarketFeed isWalletConnected={isWalletConnected} onTrade={onTrade} />
         </div>
       </div>
     </aside>
