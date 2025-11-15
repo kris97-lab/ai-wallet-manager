@@ -7,6 +7,7 @@ import {
   useImperativeHandle,
   forwardRef,
   useCallback,
+  useMemo,
   type FormEvent,
   type KeyboardEvent,
 } from 'react';
@@ -32,8 +33,9 @@ import {
   useSwitchActiveWalletChain,
 } from 'thirdweb/react';
 import { client } from '@/components/providers/thirdweb-provider';
-import { prepareTransaction } from 'thirdweb';
+import { getContract, prepareTransaction } from 'thirdweb';
 import { defineChain, polygon } from 'thirdweb/chains';
+import { getBalance } from 'thirdweb/extensions/erc20';
 import { cn } from '@/lib/utils';
 import {
   useChatHistoryStore,
@@ -56,6 +58,7 @@ export interface ChatInterfaceHandle {
 }
 
 const EMPTY_MESSAGES: ChatMessage[] = [];
+const POLYGON_USDC_ADDRESS = '0x2791Bca1f2de4661ED88A30C99A7a9449Aa84174';
 
 export const ChatInterface = forwardRef<ChatInterfaceHandle, ChatInterfaceProps>(
   function ChatInterface({ className }, ref) {
@@ -67,10 +70,58 @@ export const ChatInterface = forwardRef<ChatInterfaceHandle, ChatInterfaceProps>
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const processedPolymarketOrdersRef = useRef<Set<string>>(new Set());
+  const pendingPolymarketOrdersRef = useRef(
+    new Map<
+      string,
+      {
+        chatId: string;
+        assistantId: string;
+        requestId: string;
+        sessionId: string;
+        payload: {
+          marketId: string;
+          market: string;
+          outcome: 'YES' | 'NO';
+          outcomeId?: string;
+          side: 'buy' | 'sell';
+          price?: number | null;
+          sizeUSDC: number;
+          sizeBaseUnits: bigint;
+        };
+      }
+    >()
+  );
+  const usdcContract = useMemo(
+    () =>
+      getContract({
+        client,
+        chain: polygon,
+        address: POLYGON_USDC_ADDRESS,
+      }),
+    []
+  );
 
   const activeAccount = useActiveAccount();
   const activeChain = useActiveWalletChain();
   const requestSwitchChain = useSwitchActiveWalletChain();
+
+  const fetchUsdcBalance = useCallback(async (): Promise<bigint | null> => {
+    const address = activeAccount?.address;
+    if (!address) {
+      return null;
+    }
+
+    try {
+      const balance = await getBalance({
+        contract: usdcContract,
+        address,
+      });
+      return balance.value;
+    } catch (error) {
+      console.error('Failed to fetch USDC balance', error);
+      return null;
+    }
+  }, [activeAccount?.address, usdcContract]);
 
   useEffect(() => {
     if (!activeAccount) {
@@ -188,31 +239,21 @@ export const ChatInterface = forwardRef<ChatInterfaceHandle, ChatInterfaceProps>
     [updateMessageInStore]
   );
 
-  const handlePolymarketOrderAction = useCallback(
-    async (action: ActionEvent, chatId: string, assistantId: string) => {
-      if (action.type !== 'polymarket_order') {
+  const submitPolymarketOrder = useCallback(
+    async (orderKey: string) => {
+      const pending = pendingPolymarketOrdersRef.current.get(orderKey);
+      if (!pending) {
         return;
       }
 
-      const { status, marketId, outcomeId, side, amountUSD } = action.data;
-      if (status === 'swap') {
-        return;
-      }
+      const { chatId, assistantId, requestId, payload } = pending;
 
-      const orderKey = `${action.session_id}:${action.request_id}`;
-      if (processedPolymarketOrdersRef.current.has(orderKey)) {
-        return;
-      }
+      updatePolymarketActionStatus(chatId, assistantId, requestId, 'submitting_order');
 
-      if (!marketId || !outcomeId || !side || typeof amountUSD !== 'number' || Number.isNaN(amountUSD)) {
-        return;
-      }
-
-      processedPolymarketOrdersRef.current.add(orderKey);
-      updatePolymarketActionStatus(chatId, assistantId, action.request_id, 'order_submitted');
-
-      const normalizedSide = side.toLowerCase() === 'sell' ? 'sell' : 'buy';
-      const size = Math.max(0, Math.round(amountUSD * 1_000_000));
+      const size = Number(payload.sizeBaseUnits);
+      const normalizedSide = payload.side.toLowerCase() === 'sell' ? 'sell' : 'buy';
+      const normalizedOutcome =
+        payload.outcomeId ?? (payload.outcome === 'YES' ? 1 : 0);
 
       try {
         const response = await fetch('/api/polymarket/order', {
@@ -221,24 +262,28 @@ export const ChatInterface = forwardRef<ChatInterfaceHandle, ChatInterfaceProps>
             'Content-Type': 'application/json',
           },
           body: JSON.stringify({
-            marketId,
-            outcome: outcomeId,
+            marketId: payload.marketId,
+            outcome: normalizedOutcome,
             side: normalizedSide,
             size,
-            price: null,
+            price: payload.price ?? null,
           }),
         });
 
-        const result = (await response.json()) as { order?: { id?: string; orderId?: string; order_id?: string }; error?: string };
+        const result = (await response.json()) as {
+          ok?: boolean;
+          order?: { id?: string; orderId?: string; order_id?: string };
+          error?: string;
+        };
 
-        if (response.ok && result?.order) {
+        if (response.ok && result?.ok && result.order) {
           const orderId =
             result.order.id ??
             (typeof result.order.orderId === 'string' ? result.order.orderId : undefined) ??
             (typeof result.order.order_id === 'string' ? result.order.order_id : undefined) ??
             'unknown';
 
-          updatePolymarketActionStatus(chatId, assistantId, action.request_id, 'completed');
+          updatePolymarketActionStatus(chatId, assistantId, requestId, 'completed');
 
           const confirmationMessage: ChatMessage = {
             id: generateMessageId(),
@@ -251,6 +296,9 @@ export const ChatInterface = forwardRef<ChatInterfaceHandle, ChatInterfaceProps>
           addMessageToStore(chatId, confirmationMessage);
         } else {
           const errorMessage = typeof result?.error === 'string' ? result.error : 'Unknown error';
+
+          updatePolymarketActionStatus(chatId, assistantId, requestId, 'error');
+
           const rejectionMessage: ChatMessage = {
             id: generateMessageId(),
             role: 'assistant',
@@ -263,6 +311,9 @@ export const ChatInterface = forwardRef<ChatInterfaceHandle, ChatInterfaceProps>
         }
       } catch (error) {
         const fallbackMessage = error instanceof Error ? error.message : String(error);
+
+        updatePolymarketActionStatus(chatId, assistantId, requestId, 'error');
+
         const rejectionMessage: ChatMessage = {
           id: generateMessageId(),
           role: 'assistant',
@@ -273,15 +324,140 @@ export const ChatInterface = forwardRef<ChatInterfaceHandle, ChatInterfaceProps>
 
         addMessageToStore(chatId, rejectionMessage);
       } finally {
+        pendingPolymarketOrdersRef.current.delete(orderKey);
         processedPolymarketOrdersRef.current.delete(orderKey);
       }
     },
+    [addMessageToStore, generateMessageId, updatePolymarketActionStatus]
+  );
+
+  const handlePolymarketOrderAction = useCallback(
+    async (action: ActionEvent, chatId: string, assistantId: string) => {
+      if (action.type !== 'polymarket_order') {
+        return;
+      }
+
+      const { marketId, market, outcome, outcomeId, side, sizeUSDC, price } = action.data;
+      if (
+        !marketId ||
+        !market ||
+        !outcome ||
+        !side ||
+        typeof sizeUSDC !== 'number' ||
+        Number.isNaN(sizeUSDC) ||
+        sizeUSDC <= 0
+      ) {
+        return;
+      }
+
+      const orderKey = `${action.session_id}:${action.request_id}`;
+      if (processedPolymarketOrdersRef.current.has(orderKey)) {
+        return;
+      }
+
+      const sizeBaseUnits = BigInt(Math.round(sizeUSDC * 1_000_000));
+
+      pendingPolymarketOrdersRef.current.set(orderKey, {
+        chatId,
+        assistantId,
+        requestId: action.request_id,
+        sessionId: action.session_id,
+        payload: {
+          marketId,
+          market,
+          outcome,
+          outcomeId,
+          side,
+          price: price ?? null,
+          sizeUSDC,
+          sizeBaseUnits,
+        },
+      });
+
+      processedPolymarketOrdersRef.current.add(orderKey);
+
+      const balance = await fetchUsdcBalance();
+      if (balance === null) {
+        updatePolymarketActionStatus(chatId, assistantId, action.request_id, 'error');
+
+        const message: ChatMessage = {
+          id: generateMessageId(),
+          role: 'assistant',
+          content: 'Order rejected: Unable to verify USDC balance for this wallet.',
+          timestamp: new Date().toISOString(),
+          status: 'error',
+        };
+
+        addMessageToStore(chatId, message);
+        pendingPolymarketOrdersRef.current.delete(orderKey);
+        processedPolymarketOrdersRef.current.delete(orderKey);
+        return;
+      }
+
+      if (balance >= sizeBaseUnits) {
+        await submitPolymarketOrder(orderKey);
+        return;
+      }
+
+      updatePolymarketActionStatus(chatId, assistantId, action.request_id, 'awaiting_swap');
+    },
     [
       addMessageToStore,
+      fetchUsdcBalance,
       generateMessageId,
+      pendingPolymarketOrdersRef,
       processedPolymarketOrdersRef,
+      submitPolymarketOrder,
       updatePolymarketActionStatus,
     ]
+  );
+
+  const handleSwapConfirmed = useCallback(
+    async (action: ActionEvent) => {
+      if (action.type !== 'sign_swap') {
+        return;
+      }
+
+      const orderKey = `${action.session_id}:${action.request_id}`;
+      if (!pendingPolymarketOrdersRef.current.has(orderKey)) {
+        return;
+      }
+
+      await submitPolymarketOrder(orderKey);
+    },
+    [submitPolymarketOrder]
+  );
+
+  const handleSwapError = useCallback(
+    (action: ActionEvent, reason: unknown) => {
+      if (action.type !== 'sign_swap') {
+        return;
+      }
+
+      const orderKey = `${action.session_id}:${action.request_id}`;
+      const pending = pendingPolymarketOrdersRef.current.get(orderKey);
+      if (!pending) {
+        return;
+      }
+
+      pendingPolymarketOrdersRef.current.delete(orderKey);
+      processedPolymarketOrdersRef.current.delete(orderKey);
+
+      updatePolymarketActionStatus(pending.chatId, pending.assistantId, pending.requestId, 'error');
+
+      const errorMessage = reason instanceof Error ? reason.message : String(reason);
+
+      const rejectionMessage: ChatMessage = {
+        id: generateMessageId(),
+        role: 'assistant',
+        content: `Order rejected: ${errorMessage}`,
+        timestamp: new Date().toISOString(),
+        status: 'error',
+      };
+
+      addMessageToStore(pending.chatId, rejectionMessage);
+    },
+    [addMessageToStore, generateMessageId, updatePolymarketActionStatus]
   );
 
   const submitMessage = useCallback(
@@ -614,31 +790,59 @@ export const ChatInterface = forwardRef<ChatInterfaceHandle, ChatInterfaceProps>
                     <div className="mt-4 space-y-3">
                       {message.actions.map((action, index) => {
                         if (action.type === 'polymarket_order') {
-                          const { market, side, outcome, amountUSD, status } = action.data;
-                          const stage = status ?? 'swap';
-                          const swapStatus = stage === 'swap' ? 'in_progress' : 'complete';
-                          const orderStatus =
-                            stage === 'order_submitted'
-                              ? 'in_progress'
-                              : stage === 'completed'
+                          const { market, side, outcome, sizeUSDC, status } = action.data;
+
+                          const stage = status ?? 'awaiting_swap';
+                          const swapState =
+                            stage === 'completed'
                               ? 'complete'
+                              : stage === 'submitting_order'
+                              ? 'complete'
+                              : stage === 'error'
+                              ? 'error'
+                              : 'in_progress';
+                          const orderState =
+                            stage === 'completed'
+                              ? 'complete'
+                              : stage === 'submitting_order'
+                              ? 'in_progress'
+                              : stage === 'error'
+                              ? 'error'
                               : 'pending';
 
                           const formattedAmount =
-                            typeof amountUSD === 'number' && Number.isFinite(amountUSD)
-                              ? `$${amountUSD.toLocaleString(undefined, { maximumFractionDigits: 2 })}`
+                            typeof sizeUSDC === 'number' && Number.isFinite(sizeUSDC)
+                              ? `$${sizeUSDC.toLocaleString(undefined, { maximumFractionDigits: 2 })}`
                               : '—';
                           const outcomeLabel = outcome ? outcome.toUpperCase() : '—';
 
-                          const renderStatusIcon = (state: 'pending' | 'in_progress' | 'complete') => {
+                          const renderStatusIcon = (state: 'pending' | 'in_progress' | 'complete' | 'error') => {
                             if (state === 'complete') {
                               return <CheckCircle2 className="h-3.5 w-3.5 text-[#8ec5ff]" />;
                             }
                             if (state === 'in_progress') {
                               return <Loader2 className="h-3.5 w-3.5 animate-spin text-[#9abffd]" />;
                             }
-                            return <Circle className="h-3 w-3 text-[#3b527b]" />;
+                            if (state === 'error') {
+                              return <AlertCircle className="h-3.5 w-3.5 text-red-300" />;
+                            }
+                            return <Circle className="h-3.5 w-3.5 text-[#7fa3d4]" />;
                           };
+
+                          const swapLabel =
+                            swapState === 'complete'
+                              ? 'Swap completed'
+                              : swapState === 'error'
+                              ? 'Swap failed'
+                              : 'Swapping tokens…';
+                          const orderLabel =
+                            orderState === 'complete'
+                              ? 'Order submitted'
+                              : orderState === 'in_progress'
+                              ? 'Submitting order…'
+                              : orderState === 'error'
+                              ? 'Order failed'
+                              : 'Awaiting order submission';
 
                           return (
                             <div
@@ -671,28 +875,38 @@ export const ChatInterface = forwardRef<ChatInterfaceHandle, ChatInterfaceProps>
                                 <div
                                   className={cn(
                                     'flex items-center gap-2 transition-colors',
-                                    swapStatus === 'complete'
+                                    swapState === 'complete'
                                       ? 'text-[#8ec5ff]'
-                                      : swapStatus === 'in_progress'
+                                      : swapState === 'in_progress'
                                       ? 'text-[#9abffd]'
+                                      : swapState === 'error'
+                                      ? 'text-red-300'
                                       : 'text-[#7fa3d4]'
                                   )}
                                 >
-                                  {renderStatusIcon(swapStatus)}
-                                  <span>Swapping tokens…</span>
+                                  {renderStatusIcon(
+                                    swapState === 'complete'
+                                      ? 'complete'
+                                      : swapState === 'error'
+                                      ? 'error'
+                                      : 'in_progress'
+                                  )}
+                                  <span>{swapLabel}</span>
                                 </div>
                                 <div
                                   className={cn(
                                     'flex items-center gap-2 transition-colors',
-                                    orderStatus === 'complete'
+                                    orderState === 'complete'
                                       ? 'text-[#8ec5ff]'
-                                      : orderStatus === 'in_progress'
+                                      : orderState === 'in_progress'
                                       ? 'text-[#9abffd]'
+                                      : orderState === 'error'
+                                      ? 'text-red-300'
                                       : 'text-[#7fa3d4]'
                                   )}
                                 >
-                                  {renderStatusIcon(orderStatus)}
-                                  <span>Order submitted</span>
+                                  {renderStatusIcon(orderState)}
+                                  <span>{orderLabel}</span>
                                 </div>
                               </div>
                             </div>
@@ -751,8 +965,14 @@ export const ChatInterface = forwardRef<ChatInterfaceHandle, ChatInterfaceProps>
                             ) : action.type === 'sign_swap' ? (
                               <TransactionButton
                                 transaction={() => prepareTransactionFromAction(action.data.transaction)}
-                                onTransactionConfirmed={handleTransactionSuccess}
-                                onError={handleTransactionError}
+                                onTransactionConfirmed={async receipt => {
+                                  await handleSwapConfirmed(action);
+                                  handleTransactionSuccess(receipt);
+                                }}
+                                onError={error => {
+                                  handleSwapError(action, error);
+                                  handleTransactionError(error);
+                                }}
                                 className="mt-4 inline-flex items-center justify-center rounded-full bg-gradient-to-r from-[#1b3f7c] to-[#6aa8ff] px-4 py-2 text-xs font-semibold text-white shadow-[0_12px_30px_-20px_rgba(106,168,255,0.8)] transition-transform hover:scale-[1.02]"
                               >
                                 Confirm Swap

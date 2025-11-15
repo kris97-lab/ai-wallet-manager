@@ -279,7 +279,25 @@ export function PolymarketFeed({
             <button
               type="button"
               onClick={() => {
-                const message = `Place Polymarket order: ${trade.side || ""} ${trade.outcome || ""} on '${trade.market}'.`.replace(/\s+/g, " ").trim();
+                const suggestedAmount =
+                  Number.isFinite(trade.amountUSD) && trade.amountUSD > 0
+                    ? Math.round(trade.amountUSD).toString()
+                    : '';
+                const input = window.prompt('Enter trade amount in USDC', suggestedAmount);
+                if (!input) {
+                  return;
+                }
+                const amount = Number.parseFloat(input.trim());
+                if (!Number.isFinite(amount) || amount <= 0) {
+                  return;
+                }
+
+                const side = (trade.side || '').trim().toUpperCase();
+                const outcome = (trade.outcome || '').trim();
+                const message = `Place Polymarket order: ${side} ${outcome} on '${trade.market}' for $${amount}. Market order.`
+                  .replace(/\s+/g, ' ')
+                  .trim();
+
                 if (onTrade) {
                   onTrade(message);
                   return;

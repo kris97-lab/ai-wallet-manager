@@ -22,15 +22,20 @@ export type MonitorTransactionPayload = {
   transaction_id: string;
 };
 
-export type PolymarketOrderStatus = 'swap' | 'order_submitted' | 'completed';
+export type PolymarketOrderStatus =
+  | 'awaiting_swap'
+  | 'submitting_order'
+  | 'completed'
+  | 'error';
 
 export type PolymarketOrderPayload = {
   market: string;
-  marketId?: string;
-  side: string;
-  outcome?: string;
+  marketId: string;
+  side: 'buy' | 'sell';
+  outcome: 'YES' | 'NO';
   outcomeId?: string;
-  amountUSD?: number;
+  price?: number | null;
+  sizeUSDC: number;
   status?: PolymarketOrderStatus;
 };
 
