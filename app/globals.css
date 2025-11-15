@@ -222,3 +222,24 @@
 .feed-fade-in {
   animation: feedFadeIn 0.55s ease-out;
 }
+
+@keyframes neonPulse {
+  0% {
+    filter: drop-shadow(0 0 6px #ff00ea) drop-shadow(0 0 4px #00eaff);
+  }
+  33% {
+    filter: drop-shadow(0 0 6px #6a5bff) drop-shadow(0 0 4px #ff8c00);
+  }
+  66% {
+    filter: drop-shadow(0 0 6px #00eaff) drop-shadow(0 0 4px #ff00ea);
+  }
+  100% {
+    filter: drop-shadow(0 0 6px #ff00ea) drop-shadow(0 0 4px #00eaff);
+  }
+}
+
+@layer utilities {
+  .neon-text {
+    animation: neonPulse 3.5s ease-in-out infinite;
+  }
+}

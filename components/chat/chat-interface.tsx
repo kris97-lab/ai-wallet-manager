@@ -766,8 +766,14 @@ export const ChatInterface = forwardRef<ChatInterfaceHandle, ChatInterfaceProps>
             BeaverXBT
           </div>
         </div>
-        <div className="rounded-full border border-white/12 bg-white/[0.08] p-1 shadow-[0_0_22px_rgba(106,168,255,0.3)] backdrop-blur">
-          <ConnectButton client={client} />
+        <div className="group relative inline-flex items-center justify-center rounded-[18px] border border-white/20 bg-transparent px-0 py-0 text-white shadow-[0_0_22px_rgba(106,168,255,0.25)] transition-all duration-300 hover:border-white/40 hover:scale-[1.03]">
+          <ConnectButton
+            client={client}
+            connectButton={{
+              className:
+                'neon-text !bg-transparent !border-none !shadow-none !text-white !font-semibold !px-6 !py-2 !rounded-[18px] !transition-all group-hover:!brightness-125',
+            }}
+          />
         </div>
       </header>
 
