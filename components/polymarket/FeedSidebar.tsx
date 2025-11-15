@@ -2,6 +2,7 @@
 
 import { cn } from "@/lib/utils";
 import { PolymarketFeed } from "../PolymarketFeed";
+import { OrderDesk } from "../OrderDesk";
 
 interface FeedSidebarProps {
   className?: string;
@@ -26,11 +27,14 @@ export function FeedSidebar({ className, isWalletConnected }: FeedSidebarProps) 
             Polymarket Feed — High-impact BeaverXBT flows
           </h2>
         </header>
-        <div className="flex-1 overflow-y-auto px-5 py-4">
-          <p className="mb-4 text-xs text-sky-200/70">
-            Monitoring large matched orders above 800&nbsp;USDC. Updates every 10 seconds.
-          </p>
-          <PolymarketFeed isWalletConnected={isWalletConnected} />
+        <div className="flex-1 overflow-y-auto px-5 py-4 space-y-6">
+          <OrderDesk />
+          <div>
+            <p className="mb-4 text-xs text-sky-200/70">
+              Monitoring large matched orders above 800&nbsp;USDC. Updates every 10 seconds.
+            </p>
+            <PolymarketFeed isWalletConnected={isWalletConnected} />
+          </div>
         </div>
       </div>
     </aside>

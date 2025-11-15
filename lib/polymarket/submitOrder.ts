@@ -1,7 +1,7 @@
 import {
-  polymarketTradeEngine,
+  polymarketClient,
   type SubmitOrderRequest,
-} from "./tradeEngine";
+} from "../polymarket-client";
 
 export interface SubmitOrderInput {
   marketId: string;
@@ -63,7 +63,7 @@ export async function submitPolymarketOrder(
   };
 
   try {
-    const response = await polymarketTradeEngine.submitOrder(payload);
+    const response = await polymarketClient.submitOrder(payload);
     if (!response.ok) {
       const error = "Polymarket rejected this order. Please try again.";
       options?.onError?.(error);

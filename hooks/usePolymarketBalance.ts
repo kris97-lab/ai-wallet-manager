@@ -2,11 +2,11 @@
 
 import useSWR from "swr";
 
-import type { PolymarketBalanceSnapshot } from "@/lib/polymarket/tradeEngine";
-import { polymarketTradeEngine } from "@/lib/polymarket/tradeEngine";
+import type { PolymarketBalanceSnapshot } from "@/lib/polymarket-client";
+import { polymarketClient } from "@/lib/polymarket-client";
 
 const balanceFetcher = async (): Promise<PolymarketBalanceSnapshot> => {
-  const snapshot = await polymarketTradeEngine.getBalance();
+      const snapshot = await polymarketClient.getBalanceSnapshot();
   if (!snapshot) {
     throw new Error("Unable to fetch Polymarket balance");
   }
