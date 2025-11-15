@@ -2,14 +2,34 @@ import { NextRequest, NextResponse } from 'next/server';
 
 const THIRDWEB_API_URL = 'https://api.thirdweb.com';
 
+interface ChatMessage {
+  role: string;
+  content?: string;
+  [key: string]: unknown;
+}
+
+interface ChatRequest {
+  messages?: ChatMessage[];
+  context?: Record<string, unknown>;
+}
+
+const POLYMARKET_POLICY_MESSAGE: ChatMessage = {
+  role: 'system',
+  content:
+    'You are BeaverXBT, a Web3 execution assistant. When the most recent user message begins with "Place Polymarket order:" you must (1) parse the market name/title, trading side, desired outcome, and USD notional size from that instruction; (2) emit a thirdweb "sign_swap" action that swaps from the connected wallet\'s native gas token into USDC on Polygon chain_id 137, setting intent.amount to the parsed USD size; (3) immediately follow the swap with a "sign_transaction" action that targets the backend endpoint /api/polymarket/order on chain_id 137 with function name submitOrder(...) and zero value, ensuring the encoded payload reflects the parsed market, side, outcome, and amount; (4) stream natural language guidance describing the steps. If parsing fails, request clarification instead of producing malformed actions.',
+};
+
 export async function POST(request: NextRequest) {
   try {
-    const body = await request.json();
-    
+    const body = (await request.json()) as ChatRequest;
+
+    const incomingMessages = Array.isArray(body.messages) ? body.messages : [];
+    const messages: ChatMessage[] = [POLYMARKET_POLICY_MESSAGE, ...incomingMessages];
+
     // Extract client ID from environment variables
     const clientId = process.env.THIRDWEB_CLIENT_ID;
     const secretKey = process.env.THIRDWEB_SECRET_KEY;
-    
+
     if (!clientId && !secretKey) {
       return NextResponse.json(
         { error: 'Missing thirdweb credentials. Please set THIRDWEB_CLIENT_ID or THIRDWEB_SECRET_KEY environment variable.' },
@@ -34,7 +54,7 @@ export async function POST(request: NextRequest) {
       method: 'POST',
       headers,
       body: JSON.stringify({
-        messages: body.messages,
+        messages,
         stream: true, // Always use streaming
         context: body.context || {},
       }),
