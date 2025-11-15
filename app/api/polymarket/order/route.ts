@@ -1,5 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
 
+export const dynamic = "force-dynamic";
+export const runtime = "nodejs";
+
 const ERROR_MESSAGES: Record<string, string> = {
   insufficient_funds: "Your Polymarket balance is too low to place this order.",
   balance_not_found: "Polymarket could not find an available cash balance for this account.",
@@ -48,15 +51,40 @@ export async function POST(req: NextRequest) {
         "X-API-Key": API_KEY,
       },
       body: JSON.stringify(requestPayload),
+      cache: "no-store",
+      next: { revalidate: 0 },
     });
+    const text = await res.text();
+    let json: Record<string, unknown> | null = null;
 
-    const json = await res.json();
-    if (!res.ok) {
-      const rawCode = (json?.code || json?.error || "unknown_error") as string;
+    try {
+      json = text ? (JSON.parse(text) as Record<string, unknown>) : {};
+    } catch (error) {
+      console.error("Polymarket order returned non-JSON", {
+        request: requestPayload,
+        raw: text,
+        error,
+      });
+      return NextResponse.json(
+        {
+          error: "Polymarket returned HTML instead of JSON",
+          raw: text.slice(0, 200),
+        },
+        { status: 500 }
+      );
+    }
+
+    if (!res.ok || !json) {
+      const rawCode =
+        (typeof json?.code === "string"
+          ? json.code
+          : typeof json?.error === "string"
+          ? json.error
+          : "unknown_error") ?? "unknown_error";
       const normalizedCode = rawCode.toLowerCase();
       const friendlyMessage =
         ERROR_MESSAGES[normalizedCode] ||
-        json?.message ||
+        (typeof json?.message === "string" ? json.message : null) ||
         "Polymarket rejected this order.";
 
       console.error("Polymarket order error", {
@@ -76,7 +104,6 @@ export async function POST(req: NextRequest) {
             message: json?.message ?? null,
             code: json?.code ?? null,
             details: json?.details ?? null,
-            raw: json,
             request: {
               marketId,
               outcome,
@@ -91,13 +118,18 @@ export async function POST(req: NextRequest) {
     }
 
     const orderId =
-      json?.id ??
-      json?.order_id ??
-      json?.orderId ??
-      json?.data?.order_id ??
-      json?.data?.orderId ??
-      null;
-    const resolvedPrice = normalizeNumber(json?.price ?? json?.avg_price);
+      (typeof json?.id === "string" ? json.id : null) ??
+      (typeof json?.order_id === "string" ? json.order_id : null) ??
+      (typeof json?.orderId === "string" ? json.orderId : null) ??
+      (typeof json?.data === "object" && json.data
+        ? (json.data as Record<string, unknown>).order_id ??
+          (json.data as Record<string, unknown>).orderId ??
+          null
+        : null);
+    const resolvedPrice = normalizeNumber(
+      (json?.price as number | undefined) ??
+        (json?.avg_price as number | undefined)
+    );
 
     return NextResponse.json({
       ok: true,

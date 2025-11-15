@@ -7,6 +7,9 @@ const nextConfig: NextConfig = {
   typescript: {
     ignoreBuildErrors: true,
   },
+  env: {
+    POLY_BUILDER_KEY: process.env.POLY_BUILDER_KEY,
+  },
 };
 
 export default nextConfig;
