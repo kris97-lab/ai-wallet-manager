@@ -14,10 +14,10 @@ import { Send, Bot, User, AlertCircle, Image as ImageIcon } from 'lucide-react';
 import Image from 'next/image';
 import { stream } from 'fetch-event-stream';
 import { Streamdown } from 'streamdown';
-import { ConnectButton, useActiveAccount, TransactionButton, useActiveWalletChain } from 'thirdweb/react';
+import { ConnectButton, useActiveAccount, TransactionButton, useActiveWalletChain, useSwitchActiveWalletChain } from 'thirdweb/react';
 import { client } from '@/components/providers/thirdweb-provider';
 import { prepareTransaction } from 'thirdweb';
-import { defineChain } from 'thirdweb/chains';
+import { defineChain, polygon } from 'thirdweb/chains';
 import { cn } from '@/lib/utils';
 import {
   useChatHistoryStore,
@@ -59,6 +59,7 @@ export const ChatInterface = forwardRef<ChatInterfaceHandle, ChatInterfaceProps>
 
   const activeAccount = useActiveAccount();
   const activeChain = useActiveWalletChain();
+  const requestSwitchChain = useSwitchActiveWalletChain();
 
   function handlePolymarketPopup() {
     if (typeof window === 'undefined') return;
@@ -100,6 +101,18 @@ export const ChatInterface = forwardRef<ChatInterfaceHandle, ChatInterfaceProps>
     window.__polyLoginStarted = true;
     handlePolymarketPopup();
   }, [activeAccount, polySessionActive]);
+
+  useEffect(() => {
+    if (!activeAccount) {
+      return;
+    }
+
+    if (activeChain?.id === polygon.id) {
+      return;
+    }
+
+    void requestSwitchChain(polygon);
+  }, [activeAccount, activeChain?.id, requestSwitchChain]);
   const activeChat = useChatHistoryStore(selectActiveChat);
   const activeChatId = useChatHistoryStore(state => state.activeChatId);
   const createSession = useChatHistoryStore(state => state.createSession);

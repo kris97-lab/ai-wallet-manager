@@ -2,6 +2,7 @@
 
 import { createThirdwebClient } from "thirdweb";
 import { ThirdwebProvider } from "thirdweb/react";
+import { polygon } from "thirdweb/chains";
 
 const client = createThirdwebClient({ 
   clientId: process.env.NEXT_PUBLIC_THIRDWEB_CLIENT_ID! 
@@ -13,7 +14,10 @@ interface ThirdwebProviderWrapperProps {
 
 export function ThirdwebProviderWrapper({ children }: ThirdwebProviderWrapperProps) {
   return (
-    <ThirdwebProvider>
+    <ThirdwebProvider
+      clientId={process.env.NEXT_PUBLIC_THIRDWEB_CLIENT_ID}
+      activeChain={polygon}
+    >
       {children}
     </ThirdwebProvider>
   );
