@@ -1,125 +1,228 @@
 'use client';
 
-import { useId, useState } from 'react';
-import { ChevronDown, ChevronUp, ExternalLink, Shield, Target, TrendingUp, Zap } from 'lucide-react';
-import type { LucideIcon } from 'lucide-react';
+import { useEffect, useId, useMemo, useRef, useState } from 'react';
+import { useVirtualizer } from '@tanstack/react-virtual';
+import { ChevronDown, ChevronUp } from 'lucide-react';
+import useSWR from 'swr';
+
 import { cn } from '@/lib/utils';
 
-interface SectionItem {
-  name: string;
-  value: string;
-  hint: string;
+import { TradeOrb, type PolymarketTrade } from './TradeOrb';
+
+interface ApiTrade extends PolymarketTrade {
+  maker: string;
+  taker: string;
 }
 
-interface Section {
-  title: string;
-  description: string;
-  items: SectionItem[];
-  icon: LucideIcon;
-}
-
-const SECTION_CONTENT: Section[] = [
-  {
-    title: 'Live Market Signals',
-    description:
-      'Monitor actionable trading intel across Polymarket, curated for BeaverXBT portfolio moves.',
-    items: [
-      {
-        name: 'BTC Election Futures',
-        value: '+8.4% over 24h',
-        hint: 'Momentum',
-      },
-      {
-        name: 'ETH Rate Hike Hedge',
-        value: '+4.1% intraday',
-        hint: 'Volatility dampening',
-      },
-    ],
-    icon: TrendingUp,
-  },
-  {
-    title: 'DeFi Wallet Health',
-    description: 'Snapshot of balances, staking yields, and hedges tied to your AI wallet.',
-    items: [
-      {
-        name: 'Stable Yield Pods',
-        value: '7.2% APY',
-        hint: 'Auto-rebalanced',
-      },
-      {
-        name: 'Perp Hedge Buffer',
-        value: '$42.8k locked',
-        hint: 'Capital shield',
-      },
-    ],
-    icon: Shield,
-  },
-  {
-    title: 'Next Best Actions',
-    description:
-      'Fast tasks powered by BeaverXBT automations to improve wallet performance in seconds.',
-    items: [
-      {
-        name: 'Deploy liquidity to SOL/USDC strategy',
-        value: 'Est. +3.1% weekly',
-        hint: 'AI suggested',
-      },
-      {
-        name: 'Rebalance treasury hedge',
-        value: 'Risk score → 3.2',
-        hint: 'Stability boost',
-      },
-    ],
-    icon: Target,
-  },
-];
-
-function SidebarPanel() {
-  return (
-    <div className="flex max-h-[calc(100vh-6rem)] flex-col gap-6 overflow-y-auto pr-1">
-      {SECTION_CONTENT.map(section => {
-        const Icon = section.icon;
-        return (
-          <section key={section.title} className="space-y-3">
-            <header className="flex items-center gap-3">
-              <div className="flex h-10 w-10 items-center justify-center rounded-full bg-white/10 text-sky-200">
-                <Icon className="h-5 w-5" aria-hidden="true" />
-              </div>
-              <div>
-                <h3 className="text-base font-semibold text-white">{section.title}</h3>
-                <p className="text-sm text-sky-200/80">{section.description}</p>
-              </div>
-            </header>
-          <div className="space-y-3">
-            {section.items.map(item => (
-              <div
-                key={item.name}
-                className="group rounded-2xl border border-white/5 bg-white/5 p-4 transition hover:border-sky-300/40 hover:bg-white/10"
-              >
-                <div className="flex items-center justify-between gap-3">
-                  <div>
-                    <p className="text-sm font-medium text-white/90">{item.name}</p>
-                    <p className="text-xs text-sky-200/70">{item.hint}</p>
-                  </div>
-                  <Zap className="h-4 w-4 text-sky-200/80" aria-hidden="true" />
-                </div>
-                <p className="mt-3 text-sm font-semibold text-sky-100">{item.value}</p>
-                <button className="mt-4 inline-flex items-center gap-2 text-xs font-semibold text-sky-200 transition hover:text-sky-100">
-                  Open signal
-                  <ExternalLink className="h-3.5 w-3.5" aria-hidden="true" />
-                </button>
-              </div>
-            ))}
-          </div>
-        </section>
-        );
-      })}
-    </div>
-  );
+interface PolymarketFeedResponse {
+  trades?: ApiTrade[];
+  error?: string;
 }
 
 interface FeedSidebarProps {
   className?: string;
+}
+
+const REFRESH_INTERVAL_MS = 10_000;
+const ESTIMATED_ORB_ROW_HEIGHT = 184;
+
+const fetchPolymarketTrades = async (url: string): Promise<PolymarketTrade[]> => {
+  const response = await fetch(url, { cache: 'no-store' });
+
+  if (!response.ok) {
+    throw new Error('Failed to fetch Polymarket feed.');
+  }
+
+  const payload: unknown = await response.json();
+
+  if (!payload || typeof payload !== 'object') {
+    return [];
+  }
+
+  const { trades } = payload as PolymarketFeedResponse;
+
+  if (!Array.isArray(trades)) {
+    return [];
+  }
+
+  return trades.map(trade => ({
+    id: trade.id,
+    market: trade.market,
+    outcome: trade.outcome,
+    side: trade.side,
+    size: trade.size,
+    price: trade.price,
+    timestamp: trade.timestamp,
+  }));
+};
+
+function usePolymarketFeed() {
+  const swrResponse = useSWR<PolymarketTrade[], Error>(
+    '/api/polymarket/feed',
+    fetchPolymarketTrades,
+    {
+      refreshInterval: REFRESH_INTERVAL_MS,
+      revalidateOnFocus: false,
+      dedupingInterval: 5_000,
+    }
+  );
+
+  const trades = swrResponse.data ?? [];
+
+  return {
+    ...swrResponse,
+    trades,
+  };
+}
+
+function SidebarPanel() {
+  const { trades, error, isLoading } = usePolymarketFeed();
+  const scrollParentRef = useRef<HTMLDivElement>(null);
+  const seenIdsRef = useRef<Set<string>>(new Set());
+  const fadeTimeoutsRef = useRef<Record<string, number>>({});
+  const [recentlyAnimated, setRecentlyAnimated] = useState<Record<string, boolean>>({});
+
+  useEffect(() => {
+    const timeouts = fadeTimeoutsRef.current;
+    return () => {
+      Object.values(timeouts).forEach(timeoutId => {
+        window.clearTimeout(timeoutId);
+      });
+    };
+  }, []);
+
+  useEffect(() => {
+    if (trades.length === 0) {
+      seenIdsRef.current.clear();
+      Object.values(fadeTimeoutsRef.current).forEach(timeoutId => {
+        window.clearTimeout(timeoutId);
+      });
+      fadeTimeoutsRef.current = {};
+      setRecentlyAnimated({});
+      return;
+    }
+
+    const newIds: string[] = [];
+
+    for (const trade of trades) {
+      if (!seenIdsRef.current.has(trade.id)) {
+        seenIdsRef.current.add(trade.id);
+        newIds.push(trade.id);
+      }
+    }
+
+    if (newIds.length === 0) {
+      return;
+    }
+
+    setRecentlyAnimated(prev => {
+      const next = { ...prev };
+      newIds.forEach(id => {
+        next[id] = true;
+      });
+      return next;
+    });
+
+    newIds.forEach(id => {
+      if (fadeTimeoutsRef.current[id]) {
+        window.clearTimeout(fadeTimeoutsRef.current[id]);
+      }
+
+      fadeTimeoutsRef.current[id] = window.setTimeout(() => {
+        setRecentlyAnimated(prev => {
+          if (!prev[id]) {
+            return prev;
+          }
+
+          const next = { ...prev };
+          delete next[id];
+          return next;
+        });
+        delete fadeTimeoutsRef.current[id];
+      }, 800);
+    });
+
+    return () => {
+      newIds.forEach(id => {
+        const timeoutId = fadeTimeoutsRef.current[id];
+        if (timeoutId) {
+          window.clearTimeout(timeoutId);
+          delete fadeTimeoutsRef.current[id];
+        }
+      });
+    };
+  }, [trades]);
+
+  const virtualizer = useVirtualizer({
+    count: trades.length,
+    getScrollElement: () => scrollParentRef.current,
+    estimateSize: () => ESTIMATED_ORB_ROW_HEIGHT,
+    overscan: 12,
+  });
+
+  const emptyState = useMemo(() => trades.length === 0 && !isLoading, [trades.length, isLoading]);
+
+  return (
+    <div className="flex max-h-[calc(100vh-6rem)] flex-col gap-6">
+      <header className="space-y-2">
+        <p className="text-xs font-semibold uppercase tracking-[0.3em] text-sky-200/70">Polymarket feed</p>
+        <div className="space-y-1">
+          <h2 className="text-lg font-semibold text-white">High-impact BeaverXBT flows</h2>
+          <p className="text-sm text-sky-200/80">
+            {'Live trades above 800 USDC. Auto-refreshes every 10 seconds.'}
+          </p>
+        </div>
+        <div className="flex items-center justify-between text-xs text-sky-200/70">
+          <span>{trades.length > 0 ? `${Math.min(trades.length, 50)} signals streaming` : 'Awaiting signals'}</span>
+          <span>Last sync • realtime</span>
+        </div>
+      </header>
+
+      <div className="relative rounded-2xl border border-white/5 bg-white/5">
+        <div
+          ref={scrollParentRef}
+          className="max-h-[calc(100vh-12rem)] overflow-y-auto pr-2"
+          style={{ scrollbarWidth: 'thin' }}
+        >
+          {emptyState ? (
+            <div className="flex h-40 flex-col items-center justify-center gap-2 text-center text-sm text-sky-200/70">
+              {error ? 'Unable to load Polymarket trades right now.' : 'No large trades detected yet.'}
+            </div>
+          ) : (
+            <div style={{ height: `${virtualizer.getTotalSize()}px`, position: 'relative' }}>
+              {virtualizer.getVirtualItems().map(virtualRow => {
+                const trade = trades[virtualRow.index];
+
+                if (!trade) {
+                  return null;
+                }
+
+                const isRecent = Boolean(recentlyAnimated[trade.id]);
+
+                return (
+                  <div
+                    key={virtualRow.key}
+                    ref={virtualRow.measureElement}
+                    className="absolute left-0 right-0"
+                    style={{ transform: `translateY(${virtualRow.start}px)` }}
+                  >
+                    <div
+                      className={cn(
+                        'flex justify-center py-4 transition-opacity duration-500 hover:opacity-100',
+                        isRecent ? 'orb-fade-in' : 'opacity-90'
+                      )}
+                    >
+                      <TradeOrb trade={trade} />
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+        </div>
+      </div>
+    </div>
+  );
 }
 
 export function FeedSidebar({ className }: FeedSidebarProps) {
