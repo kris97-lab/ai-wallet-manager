@@ -162,11 +162,13 @@ function formatTimestamp(ts: string) {
 interface PolymarketFeedProps {
   className?: string;
   isWalletConnected: boolean;
+  onTrade?: (message: string) => void;
 }
 
 export function PolymarketFeed({
   className,
   isWalletConnected,
+  onTrade,
 }: PolymarketFeedProps) {
   const { data, error } = useSWR<PolymarketTrade[]>(
     isWalletConnected ? "/api/polymarket/feed" : null,
@@ -272,6 +274,22 @@ export function PolymarketFeed({
                 {formatTimestamp(trade.ts)}
               </span>
             </div>
+          </div>
+          <div className="mt-4 flex justify-end">
+            <button
+              type="button"
+              onClick={() => {
+                const message = `Place Polymarket order: ${trade.side || ""} ${trade.outcome || ""} on '${trade.market}' for $${trade.amountUSD}. Market order.`.replace(/\s+/g, " ").trim();
+                if (onTrade) {
+                  onTrade(message);
+                  return;
+                }
+                console.log(message);
+              }}
+              className="rounded-xl bg-gradient-to-r from-[#1b3f7c] via-[#254d93] to-[#6aa8ff] px-4 py-1.5 text-xs font-semibold text-white shadow-[0_10px_30px_-20px_rgba(106,168,255,0.7)] transition hover:brightness-110"
+            >
+              Trade via AI
+            </button>
           </div>
         </li>
       ))}
