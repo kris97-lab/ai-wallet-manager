@@ -354,6 +354,12 @@ export function ChatInterface({ className }: ChatInterfaceProps) {
     }
   };
 
+  const handleTradeTemplate = () => {
+    const template = 'Place Polymarket order: ';
+    setInput(template);
+    textareaRef.current?.focus();
+  };
+
   return (
     <div
       className={cn(
@@ -569,16 +575,23 @@ export function ChatInterface({ className }: ChatInterfaceProps) {
                   onChange={event => setInput(event.target.value)}
                   onKeyDown={handleKeyDown}
                   placeholder="Craft your Web3 request or trading strategy..."
-                  className="w-full resize-none rounded-xl border border-white/15 bg-white/[0.06] px-5 py-3 pr-36 text-sm text-white placeholder:text-[#7fa3d4] focus:border-[#6aa8ff] focus:outline-none focus:ring-2 focus:ring-[#6aa8ff]/40"
+                  className="w-full resize-none rounded-xl border border-white/15 bg-white/[0.06] px-5 py-3 pr-48 text-sm text-white placeholder:text-[#7fa3d4] focus:border-[#6aa8ff] focus:outline-none focus:ring-2 focus:ring-[#6aa8ff]/40"
                   rows={1}
                   style={{ minHeight: '52px', maxHeight: '160px' }}
                   disabled={isLoading}
                 />
+                <button
+                  type="button"
+                  onClick={handleTradeTemplate}
+                  className="absolute right-12 top-1/2 -translate-y-1/2 rounded-full bg-gradient-to-r from-[#1b3f7c] to-[#6aa8ff] px-4 py-1 text-[10px] font-semibold text-white shadow-[0_0_18px_rgba(106,168,255,0.35)] transition-colors hover:from-[#254d93] hover:to-[#6aa8ff]"
+                >
+                  Trade
+                </button>
                 {activeAccount && !polySessionActive && (
                   <button
                     type="button"
                     onClick={handlePolymarketPopup}
-                    className="absolute right-14 top-1/2 -translate-y-1/2 rounded-full bg-[#1b3f7c]/70 px-3 py-1.5 text-[10px] font-semibold text-[#9abffd] border border-white/20 shadow-[0_0_18px_rgba(106,168,255,0.35)] hover:bg-[#254d93] hover:text-white transition-colors"
+                    className="absolute right-24 top-1/2 -translate-y-1/2 rounded-full bg-[#1b3f7c]/70 px-3 py-1.5 text-[10px] font-semibold text-[#9abffd] border border-white/20 shadow-[0_0_18px_rgba(106,168,255,0.35)] hover:bg-[#254d93] hover:text-white transition-colors"
                   >
                     Enable Poly
                   </button>
