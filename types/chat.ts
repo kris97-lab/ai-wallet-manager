@@ -26,8 +26,10 @@ export type PolymarketOrderStatus = 'swap' | 'order_submitted' | 'completed';
 
 export type PolymarketOrderPayload = {
   market: string;
+  marketId?: string;
   side: string;
   outcome?: string;
+  outcomeId?: string;
   amountUSD?: number;
   status?: PolymarketOrderStatus;
 };

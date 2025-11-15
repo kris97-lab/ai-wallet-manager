@@ -24,7 +24,13 @@ import {
 import Image from 'next/image';
 import { stream } from 'fetch-event-stream';
 import { Streamdown } from 'streamdown';
-import { ConnectButton, useActiveAccount, TransactionButton, useActiveWalletChain, useSwitchActiveWalletChain } from 'thirdweb/react';
+import {
+  ConnectButton,
+  useActiveAccount,
+  TransactionButton,
+  useActiveWalletChain,
+  useSwitchActiveWalletChain,
+} from 'thirdweb/react';
 import { client } from '@/components/providers/thirdweb-provider';
 import { prepareTransaction } from 'thirdweb';
 import { defineChain, polygon } from 'thirdweb/chains';
@@ -38,6 +44,7 @@ import type {
   ActionEvent,
   ImageEvent,
   TransactionPayload,
+  PolymarketOrderStatus,
 } from '@/types/chat';
 
 interface ChatInterfaceProps {
@@ -50,12 +57,6 @@ export interface ChatInterfaceHandle {
 
 const EMPTY_MESSAGES: ChatMessage[] = [];
 
-declare global {
-  interface Window {
-    __polyLoginStarted?: boolean;
-  }
-}
-
 export const ChatInterface = forwardRef<ChatInterfaceHandle, ChatInterfaceProps>(
   function ChatInterface({ className }, ref) {
   const [input, setInput] = useState('');
@@ -63,54 +64,13 @@ export const ChatInterface = forwardRef<ChatInterfaceHandle, ChatInterfaceProps>
   const [, setCurrentRequestId] = useState<string | null>(null);
   const [thinkingMessage, setThinkingMessage] = useState<string | null>(null);
   const [isThinking, setIsThinking] = useState(false);
-  const [polySessionActive, setPolySessionActive] = useState(false);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
+  const processedPolymarketOrdersRef = useRef<Set<string>>(new Set());
 
   const activeAccount = useActiveAccount();
   const activeChain = useActiveWalletChain();
   const requestSwitchChain = useSwitchActiveWalletChain();
-
-  function handlePolymarketPopup() {
-    if (typeof window === 'undefined') return;
-
-    const popup = window.open(
-      '/api/polymarket/login',
-      'polylogin',
-      'width=380,height=500'
-    );
-
-    const timer = setInterval(() => {
-      if (popup && popup.closed) {
-        clearInterval(timer);
-        window.location.reload();
-      }
-    }, 300);
-  }
-
-  useEffect(() => {
-    fetch('/api/polymarket/session-check')
-      .then(response => response.json())
-      .then(data => setPolySessionActive(Boolean(data?.active)))
-      .catch(() => setPolySessionActive(false));
-  }, []);
-
-  useEffect(() => {
-    if (!activeAccount || polySessionActive) {
-      return;
-    }
-
-    if (typeof window === 'undefined') {
-      return;
-    }
-
-    if (window.__polyLoginStarted) {
-      return;
-    }
-
-    window.__polyLoginStarted = true;
-    handlePolymarketPopup();
-  }, [activeAccount, polySessionActive]);
 
   useEffect(() => {
     if (!activeAccount) {
@@ -121,7 +81,9 @@ export const ChatInterface = forwardRef<ChatInterfaceHandle, ChatInterfaceProps>
       return;
     }
 
-    void requestSwitchChain(polygon);
+    if (requestSwitchChain) {
+      void requestSwitchChain(polygon);
+    }
   }, [activeAccount, activeChain?.id, requestSwitchChain]);
   const activeChat = useChatHistoryStore(selectActiveChat);
   const activeChatId = useChatHistoryStore(state => state.activeChatId);
@@ -198,6 +160,129 @@ export const ChatInterface = forwardRef<ChatInterfaceHandle, ChatInterfaceProps>
       setThinkingMessage(null);
     }
   }, [messages, isThinking]);
+
+  const updatePolymarketActionStatus = useCallback(
+    (chatId: string, assistantId: string, requestId: string, status: PolymarketOrderStatus) => {
+      updateMessageInStore(chatId, assistantId, message => {
+        if (!message.actions) {
+          return message;
+        }
+
+        return {
+          ...message,
+          actions: message.actions.map(action => {
+            if (action.type === 'polymarket_order' && action.request_id === requestId) {
+              return {
+                ...action,
+                data: {
+                  ...action.data,
+                  status,
+                },
+              };
+            }
+            return action;
+          }),
+        };
+      });
+    },
+    [updateMessageInStore]
+  );
+
+  const handlePolymarketOrderAction = useCallback(
+    async (action: ActionEvent, chatId: string, assistantId: string) => {
+      if (action.type !== 'polymarket_order') {
+        return;
+      }
+
+      const { status, marketId, outcomeId, side, amountUSD } = action.data;
+      if (status === 'swap') {
+        return;
+      }
+
+      const orderKey = `${action.session_id}:${action.request_id}`;
+      if (processedPolymarketOrdersRef.current.has(orderKey)) {
+        return;
+      }
+
+      if (!marketId || !outcomeId || !side || typeof amountUSD !== 'number' || Number.isNaN(amountUSD)) {
+        return;
+      }
+
+      processedPolymarketOrdersRef.current.add(orderKey);
+      updatePolymarketActionStatus(chatId, assistantId, action.request_id, 'order_submitted');
+
+      const normalizedSide = side.toLowerCase() === 'sell' ? 'sell' : 'buy';
+      const size = Math.max(0, Math.round(amountUSD * 1_000_000));
+
+      try {
+        const response = await fetch('/api/polymarket/order', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({
+            marketId,
+            outcome: outcomeId,
+            side: normalizedSide,
+            size,
+            price: null,
+          }),
+        });
+
+        const result = (await response.json()) as { order?: { id?: string; orderId?: string; order_id?: string }; error?: string };
+
+        if (response.ok && result?.order) {
+          const orderId =
+            result.order.id ??
+            (typeof result.order.orderId === 'string' ? result.order.orderId : undefined) ??
+            (typeof result.order.order_id === 'string' ? result.order.order_id : undefined) ??
+            'unknown';
+
+          updatePolymarketActionStatus(chatId, assistantId, action.request_id, 'completed');
+
+          const confirmationMessage: ChatMessage = {
+            id: generateMessageId(),
+            role: 'assistant',
+            content: `Your Polymarket market order has been submitted successfully!\nOrder ID: ${orderId}`,
+            timestamp: new Date().toISOString(),
+            status: 'sent',
+          };
+
+          addMessageToStore(chatId, confirmationMessage);
+        } else {
+          const errorMessage = typeof result?.error === 'string' ? result.error : 'Unknown error';
+          const rejectionMessage: ChatMessage = {
+            id: generateMessageId(),
+            role: 'assistant',
+            content: `Order rejected: ${errorMessage}`,
+            timestamp: new Date().toISOString(),
+            status: 'error',
+          };
+
+          addMessageToStore(chatId, rejectionMessage);
+        }
+      } catch (error) {
+        const fallbackMessage = error instanceof Error ? error.message : String(error);
+        const rejectionMessage: ChatMessage = {
+          id: generateMessageId(),
+          role: 'assistant',
+          content: `Order rejected: ${fallbackMessage}`,
+          timestamp: new Date().toISOString(),
+          status: 'error',
+        };
+
+        addMessageToStore(chatId, rejectionMessage);
+      } finally {
+        processedPolymarketOrdersRef.current.delete(orderKey);
+      }
+    },
+    [
+      addMessageToStore,
+      generateMessageId,
+      processedPolymarketOrdersRef,
+      updatePolymarketActionStatus,
+    ]
+  );
 
   const submitMessage = useCallback(
     async (contentOverride?: string) => {
@@ -316,6 +401,10 @@ export const ChatInterface = forwardRef<ChatInterfaceHandle, ChatInterfaceProps>
                   ...message,
                   actions: [...(message.actions ?? []), actionData],
                 }));
+
+                if (actionData.type === 'polymarket_order') {
+                  void handlePolymarketOrderAction(actionData, chatId, assistantMessageId);
+                }
                 break;
               }
 
@@ -399,6 +488,7 @@ export const ChatInterface = forwardRef<ChatInterfaceHandle, ChatInterfaceProps>
       updateMessageInStore,
       setIsThinking,
       setThinkingMessage,
+      handlePolymarketOrderAction,
     ]
   );
 
