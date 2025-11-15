@@ -5,9 +5,13 @@ import "@/styles/chatHistory.css";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import { cn } from "@/lib/utils";
-import { useChatHistoryStore, type ChatSession } from "@/store/chatHistory";
+import {
+  useChatHistoryStore,
+  type ChatSession,
+  type OrderReceipt,
+} from "@/store/chatHistory";
 
-interface ChatHistoryPanelProps {
+interface ChatHistoryProps {
   className?: string;
   isWalletConnected?: boolean;
   walletAddress?: string | null;
@@ -40,16 +44,46 @@ const sortChats = (chats: ChatSession[]) =>
     (a, b) => new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime()
   );
 
-export function ChatHistoryPanel({
+const formatReceiptAmount = (value: number) =>
+  value.toLocaleString("en-US", {
+    style: "currency",
+    currency: "USD",
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+  });
+
+const formatOutcomeFromIndex = (index: number) => (index === 0 ? "NO" : "YES");
+
+const ReceiptItem = ({ receipt }: { receipt: OrderReceipt }) => (
+  <li className="flex flex-col gap-1 rounded-2xl border border-white/10 bg-white/5 p-3 text-xs text-white/80">
+    <div className="flex items-center justify-between text-[11px] text-[#86bbff]">
+      <span className="font-semibold uppercase tracking-[0.3em]">
+        {receipt.side}
+      </span>
+      <span>{new Date(receipt.timestamp).toLocaleTimeString()}</span>
+    </div>
+    <div className="text-sm font-semibold text-white">
+      {receipt.market ?? "Polymarket Trade"}
+    </div>
+    <div className="flex flex-wrap items-center gap-2 text-[12px] text-[#b7d8ff]">
+      <span>{formatOutcomeFromIndex(receipt.outcomeIndex)}</span>
+      <span>•</span>
+      <span>{formatReceiptAmount(receipt.size)}</span>
+    </div>
+  </li>
+);
+
+export function ChatHistory({
   className,
   isWalletConnected = false,
   walletAddress = null,
   isVisible = true,
-}: ChatHistoryPanelProps) {
+}: ChatHistoryProps) {
   const chats = useChatHistoryStore(state => state.chats);
   const activeChatId = useChatHistoryStore(state => state.activeChatId);
   const setActiveSession = useChatHistoryStore(state => state.setActiveSession);
   const createSession = useChatHistoryStore(state => state.createSession);
+  const orderReceipts = useChatHistoryStore(state => state.orderReceipts);
 
   const sortedChats = useMemo(() => sortChats(chats), [chats]);
   const [hasAnimated, setHasAnimated] = useState(isWalletConnected);
@@ -145,6 +179,27 @@ export function ChatHistoryPanel({
                   </li>
                 );
               })}
+            </ul>
+          )}
+        </div>
+        <div className="border-t border-white/10 px-4 py-4">
+          <div className="mb-3 flex items-center justify-between">
+            <h3 className="text-xs font-semibold uppercase tracking-[0.3em] text-white/80">
+              Order Receipts
+            </h3>
+            <span className="text-[11px] text-[#86bbff]/70">
+              {orderReceipts.length}
+            </span>
+          </div>
+          {orderReceipts.length === 0 ? (
+            <p className="text-xs text-[#b7d8ff]/70">
+              Your executed Polymarket orders will show up here.
+            </p>
+          ) : (
+            <ul className="flex max-h-48 flex-col gap-2 overflow-y-auto pr-1">
+              {orderReceipts.map(receipt => (
+                <ReceiptItem key={receipt.id} receipt={receipt} />
+              ))}
             </ul>
           )}
         </div>

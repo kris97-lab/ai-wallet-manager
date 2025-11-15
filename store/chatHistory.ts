@@ -5,6 +5,20 @@ import { persist, createJSONStorage, type StateStorage } from 'zustand/middlewar
 
 import type { ChatMessage } from '@/types/chat';
 
+export interface OrderReceiptInput {
+  marketId: string;
+  outcomeIndex: number;
+  side: 'BUY' | 'SELL';
+  size: number;
+  market?: string;
+  outcome?: string;
+}
+
+export interface OrderReceipt extends OrderReceiptInput {
+  id: string;
+  timestamp: string;
+}
+
 export interface ChatSession {
   id: string;
   walletAddress: string;
@@ -19,6 +33,7 @@ export interface ChatSession {
 interface ChatHistoryState {
   chats: ChatSession[];
   activeChatId: string | null;
+  orderReceipts: OrderReceipt[];
   createSession: (walletAddress?: string | null, titleOverride?: string) => string;
   setActiveSession: (chatId: string) => void;
   addMessage: (chatId: string, message: ChatMessage) => void;
@@ -30,6 +45,7 @@ interface ChatHistoryState {
   setSessionId: (chatId: string, sessionId: string) => void;
   replaceMessages: (chatId: string, messages: ChatMessage[]) => void;
   findSessionByWallet: (walletAddress: string) => ChatSession | undefined;
+  addOrderReceipt: (receipt: OrderReceiptInput) => void;
 }
 
 const fallbackStorage: StateStorage = {
@@ -67,6 +83,7 @@ export const useChatHistoryStore = create<ChatHistoryState>()(
     (set, get) => ({
       chats: [],
       activeChatId: null,
+      orderReceipts: [],
       createSession: (walletAddress?: string | null, titleOverride?: string) => {
         const id =
           typeof crypto !== 'undefined' && 'randomUUID' in crypto
@@ -184,6 +201,20 @@ export const useChatHistoryStore = create<ChatHistoryState>()(
           chat => chat.walletAddress?.toLowerCase() === normalizedWallet
         );
       },
+      addOrderReceipt: receipt => {
+        const state = get();
+        const id =
+          typeof crypto !== 'undefined' && 'randomUUID' in crypto
+            ? crypto.randomUUID()
+            : Math.random().toString(36).slice(2);
+        const entry: OrderReceipt = {
+          id,
+          timestamp: new Date().toISOString(),
+          ...receipt,
+        };
+
+        set({ orderReceipts: [entry, ...state.orderReceipts].slice(0, 50) });
+      },
     }),
     {
       name: 'beaverxbt-chat-history',
@@ -193,6 +224,7 @@ export const useChatHistoryStore = create<ChatHistoryState>()(
       partialize: state => ({
         chats: state.chats,
         activeChatId: state.activeChatId,
+        orderReceipts: state.orderReceipts,
       }),
     }
   )
@@ -202,3 +234,4 @@ export const selectActiveChat = (state: ChatHistoryState) =>
   state.chats.find(chat => chat.id === state.activeChatId) ?? null;
 
 export type { ChatMessage } from '@/types/chat';
+export type { OrderReceipt };

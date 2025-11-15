@@ -1,11 +1,14 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, useCallback } from "react";
 import useSWR from "swr";
 
 import { cn } from "@/lib/utils";
 import type { PolymarketTrade } from "@/lib/polymarket";
-import type { TradePromptPayload } from "@/types/chat";
+import { useChatHistoryStore, type OrderReceiptInput } from "@/store/chatHistory";
+import { useToast } from "@/components/Toast";
+import { MarketCard } from "./PolymarketFeed/MarketCard";
+import { PolymarketOrderModal, type OrderModalTrade } from "./modals/PolymarketOrderModal";
 import "@/styles/feed-animation.css";
 
 interface PolymarketFeedResponse {
@@ -40,10 +43,10 @@ function useFadeTracker(trades: PolymarketTrade[]) {
     const timers = timeouts.current;
 
     return () => {
-      Object.values(timers).forEach((timeoutId) => {
+      Object.values(timers).forEach(timeoutId => {
         window.clearTimeout(timeoutId);
       });
-      Object.keys(timers).forEach((key) => {
+      Object.keys(timers).forEach(key => {
         delete timers[key];
       });
       seen.clear();
@@ -55,10 +58,10 @@ function useFadeTracker(trades: PolymarketTrade[]) {
     if (trades.length === 0) {
       const timers = timeouts.current;
       seenIds.current.clear();
-      Object.values(timers).forEach((timeoutId) => {
+      Object.values(timers).forEach(timeoutId => {
         window.clearTimeout(timeoutId);
       });
-      Object.keys(timers).forEach((key) => {
+      Object.keys(timers).forEach(key => {
         delete timers[key];
       });
       setActiveIds({});
@@ -79,7 +82,7 @@ function useFadeTracker(trades: PolymarketTrade[]) {
       return;
     }
 
-    setActiveIds((prev) => {
+    setActiveIds(prev => {
       const next = { ...prev };
       for (const id of newIds) {
         next[id] = true;
@@ -93,7 +96,7 @@ function useFadeTracker(trades: PolymarketTrade[]) {
         window.clearTimeout(existingTimeout);
       }
       timers[id] = window.setTimeout(() => {
-        setActiveIds((prev) => {
+        setActiveIds(prev => {
           if (!prev[id]) {
             return prev;
           }
@@ -119,58 +122,22 @@ function useFadeTracker(trades: PolymarketTrade[]) {
   return (id: string) => Boolean(activeIds[id]);
 }
 
-function formatCurrency(value: number) {
-  return value.toLocaleString("en-US", {
-    style: "currency",
-    currency: "USD",
-    minimumFractionDigits: value >= 10_000 ? 0 : 2,
-    maximumFractionDigits: value >= 10_000 ? 0 : 2,
-  });
-}
-
-function formatPrice(value: number) {
-  return value.toLocaleString("en-US", {
-    minimumFractionDigits: value >= 1 ? 2 : 4,
-    maximumFractionDigits: value >= 1 ? 2 : 4,
-  });
-}
-
-function formatTimestamp(ts: string) {
-  const date = new Date(ts);
-  if (Number.isNaN(date.getTime())) {
-    return ts;
-  }
-
-  const diffMs = Date.now() - date.getTime();
-  if (diffMs < 60_000) {
-    return "just now";
-  }
-
-  const diffMinutes = Math.floor(diffMs / 60_000);
-  if (diffMinutes < 60) {
-    return `${diffMinutes}m ago`;
-  }
-
-  const diffHours = Math.floor(diffMinutes / 60);
-  if (diffHours < 24) {
-    return `${diffHours}h ago`;
-  }
-
-  const diffDays = Math.floor(diffHours / 24);
-  return `${diffDays}d ago`;
-}
-
 interface PolymarketFeedProps {
   className?: string;
   isWalletConnected: boolean;
-  onTrade?: (payload: TradePromptPayload) => void;
 }
 
-export function PolymarketFeed({
-  className,
-  isWalletConnected,
-  onTrade,
-}: PolymarketFeedProps) {
+const normalizeOutcomeIndex = (trade: PolymarketTrade) => {
+  const numeric = Number(trade.outcomeId);
+  if (Number.isFinite(numeric)) {
+    return numeric === 0 ? 0 : 1;
+  }
+  return trade.outcome === "NO" ? 0 : 1;
+};
+
+const normalizeSide = (side: string) => (side?.trim().toUpperCase() === "SELL" ? "SELL" : "BUY");
+
+export function PolymarketFeed({ className, isWalletConnected }: PolymarketFeedProps) {
   const { data, error } = useSWR<PolymarketTrade[]>(
     isWalletConnected ? "/api/polymarket/feed" : null,
     fetcher,
@@ -183,6 +150,42 @@ export function PolymarketFeed({
 
   const trades = data ?? [];
   const isAnimating = useFadeTracker(trades);
+  const addOrderReceipt = useChatHistoryStore(state => state.addOrderReceipt);
+  const { error: showError } = useToast();
+  const [selectedTrade, setSelectedTrade] = useState<OrderModalTrade | null>(null);
+
+  const handleTradeClick = useCallback(
+    (trade: PolymarketTrade) => {
+      if (!trade.marketId) {
+        showError("Unable to trade this market because it is missing an ID.");
+        return;
+      }
+
+      const outcomeIndex = normalizeOutcomeIndex(trade);
+      const normalizedSide = normalizeSide(trade.side);
+
+      setSelectedTrade({
+        marketId: trade.marketId,
+        market: trade.market,
+        outcome: outcomeIndex === 0 ? "NO" : "YES",
+        outcomeIndex,
+        side: normalizedSide,
+        referencePrice: Number.isFinite(trade.price) ? trade.price : null,
+        defaultAmount:
+          Number.isFinite(trade.amountUSD) && trade.amountUSD > 0
+            ? Math.round(trade.amountUSD)
+            : undefined,
+      });
+    },
+    [showError]
+  );
+
+  const handleOrderComplete = useCallback(
+    (receipt: OrderReceiptInput) => {
+      addOrderReceipt(receipt);
+    },
+    [addOrderReceipt]
+  );
 
   if (!isWalletConnected) {
     return (
@@ -240,107 +243,26 @@ export function PolymarketFeed({
   }
 
   return (
-    <ul className={cn("flex flex-col gap-4", className)}>
-      {trades.map((trade) => (
-        <li
-          key={trade.id}
-          className={cn(
-            "rounded-2xl border border-white/10 bg-white/[0.07] p-4 text-sm text-sky-100 shadow-[0_0_24px_rgba(48,128,255,0.12)] backdrop-blur-xl transition hover:border-white/20 hover:bg-white/10",
-            isAnimating(trade.id) ? "fade-in" : undefined
-          )}
-        >
-          <div className="flex flex-wrap items-start justify-between gap-3">
-            <span className="text-base font-semibold text-white">{trade.market}</span>
-            <span className="whitespace-nowrap text-sm font-semibold text-emerald-300">
-              {formatCurrency(trade.amountUSD)}
-            </span>
-          </div>
-          <div className="mt-3 flex flex-wrap items-center gap-2 text-xs text-sky-200/80">
-            <span className="rounded-full bg-white/10 px-2 py-1 font-medium uppercase tracking-wide text-white/80">
-              {trade.side || "—"}
-            </span>
-            <span>{trade.outcome ? `${trade.outcome} @ ${formatPrice(trade.price)}` : formatPrice(trade.price)}</span>
-            <div className="ml-auto flex items-center gap-2">
-              {trade.url ? (
-                <a
-                  href={trade.url}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="rounded-full bg-sky-500/20 px-3 py-1 text-xs font-semibold text-sky-100 transition hover:bg-sky-500/30"
-                >
-                  Open
-                </a>
-              ) : null}
-              <span className="text-[11px] uppercase tracking-wider text-sky-300/70">
-                {formatTimestamp(trade.ts)}
-              </span>
-            </div>
-          </div>
-          <div className="mt-4 flex justify-end">
-            <button
-              type="button"
-              onClick={() => {
-                const suggestedAmount =
-                  Number.isFinite(trade.amountUSD) && trade.amountUSD > 0
-                    ? Math.round(trade.amountUSD).toString()
-                    : '';
-                const input = window.prompt('Enter trade amount in USDC', suggestedAmount);
-                if (!input) {
-                  return;
-                }
-                const amount = Number.parseFloat(input.trim());
-                if (!Number.isFinite(amount) || amount <= 0) {
-                  return;
-                }
-
-                const normalizedSide = (trade.side || '').trim().toLowerCase() === 'sell' ? 'sell' : 'buy';
-                const normalizedOutcome = (trade.outcome || '').trim().toUpperCase() === 'NO' ? 'NO' : 'YES';
-                const outcomeId =
-                  trade.outcomeId && trade.outcomeId.length > 0
-                    ? trade.outcomeId
-                    : normalizedOutcome === 'NO'
-                    ? '0'
-                    : '1';
-                const resolvedMarketId =
-                  trade.marketId && trade.marketId.length > 0
-                    ? trade.marketId
-                    : trade.slug && trade.slug.length > 0
-                    ? trade.slug
-                    : trade.id;
-                const referencePrice = Number.isFinite(trade.price) ? trade.price : 0;
-                const message = [
-                  `Place Polymarket order: ${normalizedSide.toUpperCase()} ${normalizedOutcome} on '${trade.market}' for $${amount}. Market order.`,
-                  `Market ID: ${resolvedMarketId}`,
-                  `Outcome Token: ${outcomeId}`,
-                  `Reference Price: ${formatPrice(referencePrice)}`,
-                ]
-                  .join('\n')
-                  .trim();
-
-                if (onTrade) {
-                  onTrade({
-                    message,
-                    marketId: resolvedMarketId,
-                    market: trade.market,
-                    outcome: normalizedOutcome,
-                    outcomeId,
-                    side: normalizedSide,
-                    price: referencePrice,
-                    amountUSDC: amount,
-                    slug: trade.slug,
-                    url: trade.url,
-                  });
-                  return;
-                }
-                console.log(message);
-              }}
-              className="rounded-xl bg-gradient-to-r from-[#1b3f7c] via-[#254d93] to-[#6aa8ff] px-4 py-1.5 text-xs font-semibold text-white shadow-[0_10px_30px_-20px_rgba(106,168,255,0.7)] transition hover:brightness-110"
-            >
-              Trade via AI
-            </button>
-          </div>
-        </li>
-      ))}
-    </ul>
+    <>
+      <ul className={cn("flex flex-col gap-4", className)}>
+        {trades.map(trade => (
+          <MarketCard
+            key={trade.id}
+            trade={trade}
+            highlighted={isAnimating(trade.id)}
+            onTrade={() => handleTradeClick(trade)}
+          />
+        ))}
+      </ul>
+      <PolymarketOrderModal
+        isOpen={Boolean(selectedTrade)}
+        trade={selectedTrade}
+        onClose={() => setSelectedTrade(null)}
+        onSuccess={receipt => {
+          handleOrderComplete(receipt);
+          setSelectedTrade(null);
+        }}
+      />
+    </>
   );
 }

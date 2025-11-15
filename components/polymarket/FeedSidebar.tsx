@@ -2,15 +2,13 @@
 
 import { cn } from "@/lib/utils";
 import { PolymarketFeed } from "../PolymarketFeed";
-import type { TradePromptPayload } from "@/types/chat";
 
 interface FeedSidebarProps {
   className?: string;
   isWalletConnected: boolean;
-  onTrade?: (payload: TradePromptPayload) => void;
 }
 
-export function FeedSidebar({ className, isWalletConnected, onTrade }: FeedSidebarProps) {
+export function FeedSidebar({ className, isWalletConnected }: FeedSidebarProps) {
   if (!isWalletConnected) {
     return null;
   }
@@ -32,7 +30,7 @@ export function FeedSidebar({ className, isWalletConnected, onTrade }: FeedSideb
           <p className="mb-4 text-xs text-sky-200/70">
             Monitoring large matched orders above 800&nbsp;USDC. Updates every 10 seconds.
           </p>
-          <PolymarketFeed isWalletConnected={isWalletConnected} onTrade={onTrade} />
+          <PolymarketFeed isWalletConnected={isWalletConnected} />
         </div>
       </div>
     </aside>
