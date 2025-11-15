@@ -32,13 +32,16 @@ const toNumber = (value: unknown): number | null => {
 const toString = (value: unknown): string => (typeof value === 'string' ? value : '');
 
 const toTimestamp = (value: unknown): string => {
-  if (typeof value === 'string') {
-    return value;
+  if (typeof value === 'number') {
+    return new Date(value * 1000).toISOString();
   }
 
-  if (typeof value === 'number') {
-    const milliseconds = value > 1_000_000_000_000 ? value : value * 1000;
-    return new Date(milliseconds).toISOString();
+  if (typeof value === 'string') {
+    const numeric = Number(value);
+    if (Number.isFinite(numeric)) {
+      return new Date(numeric * 1000).toISOString();
+    }
+    return value;
   }
 
   return '';
@@ -99,35 +102,24 @@ export async function GET() {
       );
     }
 
-    const payload = (await response.json()) as { trades?: unknown } | null;
+    const payload = (await response.json()) as {
+      data?: { trades?: unknown };
+      trades?: unknown;
+    } | null;
 
-    if (!payload || !Array.isArray(payload.trades)) {
-      return NextResponse.json(
-        { error: 'Unexpected Polymarket response format.' },
-        { status: 500 }
-      );
+    const tradesPayload = payload?.data?.trades ?? payload?.trades ?? [];
+
+    if (!Array.isArray(tradesPayload)) {
+      return NextResponse.json({ trades: [] });
     }
 
-    const trades = payload.trades
+    const trades = tradesPayload
       .map((entry) => {
         if (!entry || typeof entry !== 'object') {
           return null;
         }
 
         const record: UnknownRecord = { ...(entry as UnknownRecord) };
-        const rawTimestamp =
-          typeof record.timestamp === 'number'
-            ? record.timestamp
-            : typeof record.createdAt === 'number'
-            ? record.createdAt
-            : typeof record.time === 'number'
-            ? record.time
-            : null;
-
-        if (rawTimestamp !== null) {
-          record.timestamp = new Date(rawTimestamp * 1000).toISOString();
-        }
-
         return normalizeTrade(record);
       })
       .filter((trade): trade is NormalizedTrade => Boolean(trade))
