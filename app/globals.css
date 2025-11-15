@@ -225,21 +225,31 @@
 
 @keyframes neonPulse {
   0% {
-    filter: drop-shadow(0 0 6px #ff00ea) drop-shadow(0 0 4px #00eaff);
+    filter: drop-shadow(0 0 6px #8bd2ff) drop-shadow(0 0 4px #b58bff);
   }
   33% {
-    filter: drop-shadow(0 0 6px #6a5bff) drop-shadow(0 0 4px #ff8c00);
+    filter: drop-shadow(0 0 6px #b58bff) drop-shadow(0 0 4px #8bd2ff);
   }
   66% {
-    filter: drop-shadow(0 0 6px #00eaff) drop-shadow(0 0 4px #ff00ea);
+    filter: drop-shadow(0 0 6px #6ab8ff) drop-shadow(0 0 4px #ff8ef0);
   }
   100% {
-    filter: drop-shadow(0 0 6px #ff00ea) drop-shadow(0 0 4px #00eaff);
+    filter: drop-shadow(0 0 6px #8bd2ff) drop-shadow(0 0 4px #b58bff);
   }
 }
 
 @layer utilities {
   .neon-text {
-    animation: neonPulse 3.5s ease-in-out infinite;
+    animation: neonPulse 4s ease-in-out infinite;
+  }
+
+  .poly-btn {
+    background: rgba(255, 255, 255, 0.04);
+    transition: all 0.25s ease;
+    letter-spacing: 0.03em;
+  }
+
+  .poly-btn:hover {
+    background: rgba(255, 255, 255, 0.07);
   }
 }

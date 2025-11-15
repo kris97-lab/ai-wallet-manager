@@ -198,6 +198,14 @@ export const ChatInterface = forwardRef<ChatInterfaceHandle, ChatInterfaceProps>
     console.error('Transaction failed:', error);
   };
 
+  const handlePolyAuth = useCallback(() => {
+    if (typeof window === 'undefined') {
+      return;
+    }
+
+    window.open('/api/polymarket/login', 'poly_oauth', 'width=420,height=620');
+  }, []);
+
   const scrollToBottom = () => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   };
@@ -766,14 +774,30 @@ export const ChatInterface = forwardRef<ChatInterfaceHandle, ChatInterfaceProps>
             BeaverXBT
           </div>
         </div>
-        <div className="group relative inline-flex items-center justify-center rounded-[18px] border border-white/20 bg-transparent px-0 py-0 text-white shadow-[0_0_22px_rgba(106,168,255,0.25)] transition-all duration-300 hover:border-white/40 hover:scale-[1.03]">
-          <ConnectButton
-            client={client}
-            connectButton={{
-              className:
-                'neon-text !bg-transparent !border-none !shadow-none !text-white !font-semibold !px-6 !py-2 !rounded-[18px] !transition-all group-hover:!brightness-125',
-            }}
-          />
+        <div className="flex items-center gap-4">
+          <div className="neon-text rounded-xl border border-white/20 bg-white/5 px-5 py-1.5 transition-all hover:border-white/40">
+            <ConnectButton
+              client={client}
+              connectButton={{
+                className:
+                  'neon-text !bg-transparent !border-none !shadow-none !text-white !font-semibold !px-6 !py-2 !rounded-[18px] !transition-all',
+              }}
+            />
+          </div>
+          <button
+            type="button"
+            onClick={handlePolyAuth}
+            className="poly-btn neon-text flex cursor-pointer items-center gap-2 rounded-xl border border-white/20 px-5 py-1.5 text-white font-medium hover:scale-[1.05]"
+          >
+            <Image
+              src="/polymarket-logo.svg"
+              alt="Polymarket"
+              width={16}
+              height={16}
+              className="h-4 w-4 opacity-90"
+            />
+            Poly Auth
+          </button>
         </div>
       </header>
 
