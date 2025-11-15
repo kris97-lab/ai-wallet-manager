@@ -99,17 +99,37 @@ export async function GET() {
       );
     }
 
-    const payload: unknown = await response.json();
+    const payload = (await response.json()) as { trades?: unknown } | null;
 
-    if (!Array.isArray(payload)) {
+    if (!payload || !Array.isArray(payload.trades)) {
       return NextResponse.json(
         { error: 'Unexpected Polymarket response format.' },
         { status: 500 }
       );
     }
 
-    const trades = payload
-      .map((entry) => (entry && typeof entry === 'object' ? normalizeTrade(entry as UnknownRecord) : null))
+    const trades = payload.trades
+      .map((entry) => {
+        if (!entry || typeof entry !== 'object') {
+          return null;
+        }
+
+        const record: UnknownRecord = { ...(entry as UnknownRecord) };
+        const rawTimestamp =
+          typeof record.timestamp === 'number'
+            ? record.timestamp
+            : typeof record.createdAt === 'number'
+            ? record.createdAt
+            : typeof record.time === 'number'
+            ? record.time
+            : null;
+
+        if (rawTimestamp !== null) {
+          record.timestamp = new Date(rawTimestamp * 1000).toISOString();
+        }
+
+        return normalizeTrade(record);
+      })
       .filter((trade): trade is NormalizedTrade => Boolean(trade))
       .filter((trade) => trade.size > 800)
       .slice(0, 50);
