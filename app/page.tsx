@@ -1,31 +1,61 @@
 "use client";
 
-import { ChatInterface } from '@/components/chat/chat-interface';
-import { ChatHistoryPanel } from '@/components/chat/ChatHistoryPanel';
-import { FeedSidebar } from '@/components/polymarket/FeedSidebar';
-import { useActiveAccount } from 'thirdweb/react';
+import { useEffect, useState } from "react";
+
+import { ChatInterface } from "@/components/chat/chat-interface";
+import { ChatHistoryPanel } from "@/components/chat/ChatHistoryPanel";
+import { ChatHistoryToggle } from "@/components/chat/ChatHistoryToggle";
+import { FeedSidebar } from "@/components/polymarket/FeedSidebar";
+import { useActiveAccount } from "thirdweb/react";
 
 export default function Home() {
   const activeAccount = useActiveAccount();
   const isWalletConnected = Boolean(activeAccount);
-  const gridTemplateColumns = isWalletConnected
-    ? '280px 1fr 360px'
-    : '0px 1fr 0px';
+  const [showChatHistory, setShowChatHistory] = useState(true);
+  const [hasManualToggle, setHasManualToggle] = useState(false);
+
+  useEffect(() => {
+    if (!isWalletConnected) {
+      setShowChatHistory(false);
+      setHasManualToggle(false);
+    } else if (!hasManualToggle) {
+      setShowChatHistory(true);
+    }
+  }, [hasManualToggle, isWalletConnected]);
+
+  const leftColumnWidth = isWalletConnected && showChatHistory ? 260 : 0;
+  const rightColumnWidth = isWalletConnected ? 380 : 0;
+  const gridTemplateColumns = `${leftColumnWidth}px 1fr ${rightColumnWidth}px`;
+
+  const handleToggleHistory = () => {
+    if (!isWalletConnected) {
+      return;
+    }
+    setHasManualToggle(true);
+    setShowChatHistory(prev => !prev);
+  };
 
   return (
-    <div className="relative mx-auto flex min-h-screen w-full max-w-7xl flex-col px-4 py-10 sm:px-6 lg:px-8">
+    <div className="relative mx-auto flex h-screen w-full max-w-[2000px] overflow-hidden px-4 py-4 sm:px-6">
+      <ChatHistoryToggle
+        isOpen={showChatHistory && isWalletConnected}
+        onToggle={handleToggleHistory}
+        disabled={!isWalletConnected}
+      />
       <div
-        className="flex flex-1 flex-col gap-8 lg:grid lg:items-start lg:gap-8"
+        className="grid h-full w-full items-start gap-4 transition-all duration-300 ease-in-out"
         style={{ gridTemplateColumns }}
       >
         <ChatHistoryPanel
           isWalletConnected={isWalletConnected}
           walletAddress={activeAccount?.address ?? null}
+          isVisible={isWalletConnected && showChatHistory}
+          className="h-full"
         />
-        <div className="min-w-0 flex flex-1">
-          <ChatInterface className="w-full flex-1" />
+        <div className="flex h-full min-h-0 flex-col overflow-hidden">
+          <ChatInterface className="h-full w-full" />
         </div>
-        <FeedSidebar className="mt-8 lg:mt-0 lg:flex-none" isWalletConnected={isWalletConnected} />
+        <FeedSidebar className="h-full" isWalletConnected={isWalletConnected} />
       </div>
     </div>
   );

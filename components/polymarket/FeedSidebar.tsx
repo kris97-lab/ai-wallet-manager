@@ -1,8 +1,5 @@
 "use client";
 
-import { useId, useState } from "react";
-import { ChevronDown, ChevronUp } from "lucide-react";
-
 import { cn } from "@/lib/utils";
 import { PolymarketFeed } from "../PolymarketFeed";
 
@@ -11,55 +8,30 @@ interface FeedSidebarProps {
   isWalletConnected: boolean;
 }
 
-function SidebarContent({ isWalletConnected }: { isWalletConnected: boolean }) {
-  return (
-    <div className="space-y-6">
-      <header className="space-y-3">
-        <h2 className="text-lg font-semibold text-white">Polymarket Feed — High-impact BeaverXBT flows</h2>
-        <p className="text-sm text-sky-200/80">
-          Monitoring large matched orders above 800&nbsp;USDC. Updates every 10 seconds.
-        </p>
-      </header>
-      <PolymarketFeed isWalletConnected={isWalletConnected} />
-    </div>
-  );
-}
-
 export function FeedSidebar({ className, isWalletConnected }: FeedSidebarProps) {
-  const [isOpen, setIsOpen] = useState(false);
-  const panelId = useId();
-
   if (!isWalletConnected) {
     return null;
   }
 
   return (
-    <aside className={cn("w-full lg:w-[360px] lg:flex-none lg:self-stretch", className)}>
-      <div className="hidden lg:block">
-        <div className="rounded-3xl border border-white/10 bg-gradient-to-br from-[#0b1b3a]/90 to-[#0f2f5d]/90 p-6 text-white shadow-[0_0_40px_rgba(48,128,255,0.12)] backdrop-blur-xl lg:sticky lg:top-10">
-          <SidebarContent isWalletConnected={isWalletConnected} />
+    <aside
+      className={cn(
+        "hidden h-full min-h-0 lg:flex lg:w-[380px] lg:flex-col",
+        className
+      )}
+    >
+      <div className="flex h-full flex-col overflow-hidden rounded-[16px] border border-white/10 bg-gradient-to-br from-[#0b1b3a]/90 to-[#0f2f5d]/90 text-white shadow-[0_0_40px_rgba(48,128,255,0.16)] backdrop-blur-2xl">
+        <header className="flex h-[50px] items-center border-b border-white/10 px-5">
+          <h2 className="text-xs font-semibold uppercase tracking-[0.4em] text-white/90">
+            Polymarket Feed — High-impact BeaverXBT flows
+          </h2>
+        </header>
+        <div className="flex-1 overflow-y-auto px-5 py-4">
+          <p className="mb-4 text-xs text-sky-200/70">
+            Monitoring large matched orders above 800&nbsp;USDC. Updates every 10 seconds.
+          </p>
+          <PolymarketFeed isWalletConnected={isWalletConnected} />
         </div>
-      </div>
-
-      <div className="lg:hidden">
-        <button
-          type="button"
-          onClick={() => setIsOpen((open) => !open)}
-          className="flex w-full items-center justify-between rounded-2xl border border-white/10 bg-gradient-to-r from-[#0b1b3a]/95 to-[#0f2f5d]/95 px-5 py-3 text-sm font-semibold text-white shadow-[0_0_24px_rgba(48,128,255,0.18)] backdrop-blur-xl"
-          aria-expanded={isOpen}
-          aria-controls={panelId}
-        >
-          <span>Polymarket Feed</span>
-          {isOpen ? <ChevronUp className="h-4 w-4" aria-hidden="true" /> : <ChevronDown className="h-4 w-4" aria-hidden="true" />}
-        </button>
-        {isOpen ? (
-          <div
-            id={panelId}
-            className="mt-4 rounded-3xl border border-white/10 bg-gradient-to-br from-[#0b1b3a]/95 to-[#0f2f5d]/95 p-5 text-white shadow-[0_0_28px_rgba(48,128,255,0.12)] backdrop-blur-xl"
-          >
-            <SidebarContent isWalletConnected={isWalletConnected} />
-          </div>
-        ) : null}
       </div>
     </aside>
   );

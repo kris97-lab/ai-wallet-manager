@@ -11,6 +11,7 @@ interface ChatHistoryPanelProps {
   className?: string;
   isWalletConnected?: boolean;
   walletAddress?: string | null;
+  isVisible?: boolean;
 }
 
 const formatTimestamp = (iso: string) => {
@@ -43,6 +44,7 @@ export function ChatHistoryPanel({
   className,
   isWalletConnected = false,
   walletAddress = null,
+  isVisible = true,
 }: ChatHistoryPanelProps) {
   const chats = useChatHistoryStore(state => state.chats);
   const activeChatId = useChatHistoryStore(state => state.activeChatId);
@@ -76,32 +78,26 @@ export function ChatHistoryPanel({
   return (
     <aside
       className={cn(
-        "chat-history-panel-shell hidden md:flex md:w-[280px] md:flex-col md:self-stretch lg:sticky lg:top-10",
+        "chat-history-panel-shell hidden h-full min-h-0 transition-opacity duration-200 md:flex md:w-[260px] md:flex-col md:items-stretch",
         hasAnimated && "wallet-connected",
+        !isVisible && "pointer-events-none opacity-0",
         className
       )}
-      aria-hidden={!isWalletConnected}
+      aria-hidden={!isWalletConnected || !isVisible}
       data-wallet-connected={isWalletConnected}
     >
-      <div className="flex flex-1 flex-col overflow-hidden rounded-3xl border border-white/10 bg-gradient-to-b from-[#0b1b3a]/90 to-[#0f2f5d]/90 shadow-[0_0_32px_rgba(48,128,255,0.14)] backdrop-blur-2xl">
-        <div className="border-b border-white/10 px-6 py-5">
-          <div className="flex items-center justify-between gap-3">
-            <div>
-              <h2 className="text-base font-semibold text-white">Chat History</h2>
-              <p className="mt-1 text-xs text-[#b7d8ff]/80">
-            Resume previous BeaverXBT sessions and pick up right where you left off.
-              </p>
-            </div>
-            <button
-              type="button"
-              onClick={handleCreateSession}
-              className="chat-history-new-session-btn"
-            >
-              + New Chat
-            </button>
-          </div>
+      <div className="flex h-full flex-col overflow-hidden rounded-[16px] border border-white/10 bg-gradient-to-b from-[#0b1b3a]/90 to-[#0f2f5d]/90 shadow-[0_0_28px_rgba(48,128,255,0.15)] backdrop-blur-2xl">
+        <div className="flex h-14 items-center justify-between border-b border-white/10 px-5">
+          <h2 className="text-sm font-semibold uppercase tracking-[0.35em] text-white/90">Chat History</h2>
+          <button
+            type="button"
+            onClick={handleCreateSession}
+            className="chat-history-new-session-btn"
+          >
+            + New Chat
+          </button>
         </div>
-        <div className="flex-1 overflow-y-auto px-2 py-4">
+        <div className="flex-1 overflow-y-auto px-2 py-3">
           {sortedChats.length === 0 ? (
             <div className="mt-8 px-4 text-center text-sm text-[#b7d8ff]/80">
               Conversations will appear here once you start chatting.
