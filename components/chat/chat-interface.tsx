@@ -1,7 +1,8 @@
 'use client';
 
-import { useState, useRef, useEffect } from 'react';
-import { Send, Bot, User, AlertCircle, Image as ImageIcon } from 'lucide-react';
+import { useState, useRef, useEffect, type FormEvent, type KeyboardEvent } from 'react';
+import { Send, Bot, User, AlertCircle } from 'lucide-react';
+import Image from 'next/image';
 import { stream } from 'fetch-event-stream';
 import { Streamdown } from 'streamdown';
 import { ConnectButton, useActiveAccount, TransactionButton, useActiveWalletChain } from 'thirdweb/react';
@@ -19,17 +20,66 @@ interface Message {
   status?: 'sending' | 'sent' | 'error';
 }
 
-interface ActionEvent {
-  type: 'sign_transaction' | 'sign_swap' | 'monitor_transaction';
-  data: any;
-  request_id: string;
-  session_id: string;
+interface SignTransactionActionData {
+  chain_id: number;
+  to: string;
+  value?: string;
+  data?: string;
+  function?: string;
 }
+
+interface SignSwapIntent {
+  amount: string;
+  origin_token_address: string;
+  destination_token_address: string;
+  destination_chain_id: number;
+}
+
+interface SignSwapActionData {
+  transaction: SignTransactionActionData;
+  intent: SignSwapIntent;
+}
+
+interface MonitorTransactionActionData {
+  transaction_id: string;
+}
+
+type ActionEvent =
+  | {
+      type: 'sign_transaction';
+      data: SignTransactionActionData;
+      request_id: string;
+      session_id: string;
+    }
+  | {
+      type: 'sign_swap';
+      data: SignSwapActionData;
+      request_id: string;
+      session_id: string;
+    }
+  | {
+      type: 'monitor_transaction';
+      data: MonitorTransactionActionData;
+      request_id: string;
+      session_id: string;
+    };
 
 interface ImageEvent {
   url: string;
   width: number;
   height: number;
+}
+
+interface EventPayload {
+  session_id?: string;
+  request_id?: string;
+  data?: unknown;
+  type?: string;
+  v?: string;
+  url?: string;
+  width?: number;
+  height?: number;
+  [key: string]: unknown;
 }
 
 interface ChatInterfaceProps {
@@ -41,7 +91,6 @@ export function ChatInterface({ className }: ChatInterfaceProps) {
   const [input, setInput] = useState('');
   const [isLoading, setIsLoading] = useState(false);
   const [sessionId, setSessionId] = useState<string | null>(null);
-  const [currentRequestId, setCurrentRequestId] = useState<string | null>(null);
   const [thinkingMessage, setThinkingMessage] = useState<string | null>(null);
   const [isThinking, setIsThinking] = useState(false);
   const messagesEndRef = useRef<HTMLDivElement>(null);
@@ -54,7 +103,7 @@ export function ChatInterface({ className }: ChatInterfaceProps) {
   const activeChain = useActiveWalletChain();
 
   // Transaction preparation function
-  const prepareTransactionFromAction = (actionData: any) => {
+  const prepareTransactionFromAction = (actionData: SignTransactionActionData) => {
     return prepareTransaction({
       client,
       chain: defineChain(actionData.chain_id),
@@ -65,13 +114,13 @@ export function ChatInterface({ className }: ChatInterfaceProps) {
   };
 
   // Transaction success handler
-  const handleTransactionSuccess = (receipt: any) => {
+  const handleTransactionSuccess = (receipt: unknown) => {
     console.log('Transaction confirmed:', receipt);
     // You can add additional success handling here, like updating UI or showing notifications
   };
 
   // Transaction error handler
-  const handleTransactionError = (error: any) => {
+  const handleTransactionError = (error: unknown) => {
     console.error('Transaction failed:', error);
     // You can add additional error handling here, like showing error notifications
   };
@@ -94,8 +143,8 @@ export function ChatInterface({ className }: ChatInterfaceProps) {
     }
   }, [messages, isThinking]);
 
-  const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
+  const handleSubmit = async (event?: FormEvent<HTMLFormElement>) => {
+    event?.preventDefault();
     if (!input.trim() || isLoading) return;
 
     const userMessage: Message = {
@@ -153,7 +202,7 @@ export function ChatInterface({ className }: ChatInterfaceProps) {
         }
 
         try {
-          const parsedEventData = JSON.parse(event.data);
+          const parsedEventData = JSON.parse(event.data) as EventPayload;
           
           // Hide thinking indicator immediately for any response content
           if (event.event === 'delta' || event.event === 'action' || event.event === 'image') {
@@ -164,42 +213,39 @@ export function ChatInterface({ className }: ChatInterfaceProps) {
           switch (event.event) {
             case 'init': {
               console.log('Init event', parsedEventData);
-              // Handle init event (session id and request id)
-              if (parsedEventData.session_id) {
-                setSessionId(parsedEventData.session_id);
-              }
-              if (parsedEventData.request_id) {
-                setCurrentRequestId(parsedEventData.request_id);
+              const newSessionId = typeof parsedEventData.session_id === 'string' ? parsedEventData.session_id : null;
+              if (newSessionId) {
+                setSessionId(newSessionId);
               }
               break;
             }
-            
+
             case 'presence': {
               console.log('Presence event', parsedEventData);
               // Handle intermediate thinking steps - show as thinking indicator
-              if (parsedEventData.data && typeof parsedEventData.data === 'string') {
+              if (typeof parsedEventData.data === 'string') {
                 console.log('Setting thinking message:', parsedEventData.data);
                 setThinkingMessage(parsedEventData.data);
                 setIsThinking(true);
               }
               break;
             }
-            
+
             case 'delta': {
               console.log('Delta event', parsedEventData, 'isThinking:', isThinking);
-              
+
               // Hide thinking indicator immediately when ANY delta event arrives
               if (isThinking) {
                 console.log('Hiding thinking indicator on delta event');
                 setIsThinking(false);
                 setThinkingMessage(null);
               }
-              
+
               // Handle delta event (streamed output text response)
-              if (parsedEventData.v) {
-                setMessages(prev => 
-                  prev.map(msg => 
-                    msg.id === assistantMessageId 
+              if (typeof parsedEventData.v === 'string') {
+                setMessages(prev =>
+                  prev.map(msg =>
+                    msg.id === assistantMessageId
                       ? { ...msg, content: msg.content + parsedEventData.v }
                       : msg
                   )
@@ -207,7 +253,7 @@ export function ChatInterface({ className }: ChatInterfaceProps) {
               }
               break;
             }
-            
+
             case 'action': {
               console.log('Action event', parsedEventData);
               
@@ -218,23 +264,57 @@ export function ChatInterface({ className }: ChatInterfaceProps) {
               }
               
               // Handle transaction signing, swaps, monitoring
-              const actionData: ActionEvent = {
-                type: parsedEventData.type,
-                data: parsedEventData.data,
-                request_id: parsedEventData.request_id,
-                session_id: parsedEventData.session_id,
-              };
-              
-              setMessages(prev => 
-                prev.map(msg => 
-                  msg.id === assistantMessageId 
-                    ? { ...msg, actions: [...(msg.actions || []), actionData] }
-                    : msg
-                )
-              );
+              const requestId = typeof parsedEventData.request_id === 'string' ? parsedEventData.request_id : '';
+              const sessionValue = typeof parsedEventData.session_id === 'string' ? parsedEventData.session_id : '';
+              let actionData: ActionEvent | null = null;
+
+              if (
+                parsedEventData.type === 'sign_transaction' &&
+                typeof parsedEventData.data === 'object' &&
+                parsedEventData.data !== null
+              ) {
+                actionData = {
+                  type: 'sign_transaction',
+                  data: parsedEventData.data as SignTransactionActionData,
+                  request_id: requestId,
+                  session_id: sessionValue,
+                };
+              } else if (
+                parsedEventData.type === 'sign_swap' &&
+                typeof parsedEventData.data === 'object' &&
+                parsedEventData.data !== null
+              ) {
+                actionData = {
+                  type: 'sign_swap',
+                  data: parsedEventData.data as SignSwapActionData,
+                  request_id: requestId,
+                  session_id: sessionValue,
+                };
+              } else if (
+                parsedEventData.type === 'monitor_transaction' &&
+                typeof parsedEventData.data === 'object' &&
+                parsedEventData.data !== null
+              ) {
+                actionData = {
+                  type: 'monitor_transaction',
+                  data: parsedEventData.data as MonitorTransactionActionData,
+                  request_id: requestId,
+                  session_id: sessionValue,
+                };
+              }
+
+              if (actionData) {
+                setMessages(prev =>
+                  prev.map(msg =>
+                    msg.id === assistantMessageId
+                      ? { ...msg, actions: [...(msg.actions || []), actionData] }
+                      : msg
+                  )
+                );
+              }
               break;
             }
-            
+
             case 'image': {
               console.log('Image event', parsedEventData);
               
@@ -245,19 +325,27 @@ export function ChatInterface({ className }: ChatInterfaceProps) {
               }
               
               // Handle image rendering
-              const imageData: ImageEvent = {
-                url: parsedEventData.url,
-                width: parsedEventData.width,
-                height: parsedEventData.height,
-              };
-              
-              setMessages(prev => 
-                prev.map(msg => 
-                  msg.id === assistantMessageId 
-                    ? { ...msg, images: [...(msg.images || []), imageData] }
-                    : msg
-                )
-              );
+              if (typeof parsedEventData.url === 'string') {
+                const imageData: ImageEvent = {
+                  url: parsedEventData.url,
+                  width:
+                    typeof parsedEventData.width === 'number'
+                      ? parsedEventData.width
+                      : Number(parsedEventData.width ?? 512),
+                  height:
+                    typeof parsedEventData.height === 'number'
+                      ? parsedEventData.height
+                      : Number(parsedEventData.height ?? 512),
+                };
+
+                setMessages(prev =>
+                  prev.map(msg =>
+                    msg.id === assistantMessageId
+                      ? { ...msg, images: [...(msg.images || []), imageData] }
+                      : msg
+                  )
+                );
+              }
               break;
             }
             
@@ -274,12 +362,17 @@ export function ChatInterface({ className }: ChatInterfaceProps) {
               setThinkingMessage(null);
               
               // Handle error event
-              setMessages(prev => 
-                prev.map(msg => 
-                  msg.id === assistantMessageId 
-                    ? { 
-                        ...msg, 
-                        content: msg.content + '\n\n❌ Error: ' + (parsedEventData.data || 'An error occurred'),
+              const errorMessage =
+                typeof parsedEventData.data === 'string'
+                  ? parsedEventData.data
+                  : 'An error occurred';
+
+              setMessages(prev =>
+                prev.map(msg =>
+                  msg.id === assistantMessageId
+                    ? {
+                        ...msg,
+                        content: `${msg.content}\n\n❌ Error: ${errorMessage}`,
                         status: 'error'
                       }
                     : msg
@@ -329,10 +422,10 @@ export function ChatInterface({ className }: ChatInterfaceProps) {
     }
   };
 
-  const handleKeyDown = (e: React.KeyboardEvent) => {
-    if (e.key === 'Enter' && !e.shiftKey) {
-      e.preventDefault();
-      handleSubmit(e as any);
+  const handleKeyDown = (event: KeyboardEvent<HTMLTextAreaElement>) => {
+    if (event.key === 'Enter' && !event.shiftKey) {
+      event.preventDefault();
+      void handleSubmit();
     }
   };
 
@@ -404,11 +497,14 @@ export function ChatInterface({ className }: ChatInterfaceProps) {
                 <div className="mt-2 space-y-2">
                   {message.images.map((image, index) => (
                     <div key={index} className="relative">
-                      <img
+                      <Image
                         src={image.url}
                         alt="AI generated content"
-                        className="rounded-lg max-w-full h-auto"
+                        className="rounded-lg h-auto w-full"
+                        width={Math.max(1, image.width)}
+                        height={Math.max(1, image.height)}
                         style={{ maxWidth: Math.min(image.width, 400), maxHeight: Math.min(image.height, 300) }}
+                        unoptimized
                       />
                     </div>
                   ))}
